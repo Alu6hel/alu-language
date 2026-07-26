@@ -1,0 +1,18 @@
+// ST-04: std::mem - Bump/Slab allocators bridged to CHERI bounds checking
+
+routine bump_alloc(size) {
+    @requires size > 0
+    @ensures return != null
+    
+    unsafe {
+        // Assume bump_pool is globally defined in hw_mem.alu
+        cap pool = 0x400000..0x500000
+        reg ptr = pool.base + offset
+        
+        // CHERI bounds check via inline assembly macro
+        asm("cheri_bounds_check ptr, size, pool.length")
+        
+        offset = offset + size
+        return ptr
+    }
+}

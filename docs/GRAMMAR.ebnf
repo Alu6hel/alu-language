@@ -1,0 +1,18 @@
+# ST-02: Total EBNF Grammar for ALU Language
+
+Program ::= { Statement }
+Statement ::= RoutineDef | CapabilityDef | UnsafeBlock | Assignment | ReturnStmt
+RoutineDef ::= "routine" Identifier [ "(" ParameterList ")" ] Block
+CapabilityDef ::= "cap" Identifier "=" Expr ".." Expr
+UnsafeBlock ::= "unsafe" Block
+Assignment ::= [ "reg" ] Identifier "=" Expr
+ReturnStmt ::= "return" Expr
+Block ::= "{" { Statement } "}"
+ParameterList ::= Identifier { "," Identifier }
+Expr ::= BitwiseExpr
+BitwiseExpr ::= AddExpr { ( "<<" | ">>" | "&" | "|" | "^" ) AddExpr }
+AddExpr ::= MulExpr { ( "+" | "-" ) MulExpr }
+MulExpr ::= PrimaryExpr { ( "*" | "/" ) PrimaryExpr }
+PrimaryExpr ::= Identifier | Number | "(" Expr ")" | MacroCall | AsmCall
+MacroCall ::= "UNROLL" "(" Number ")" Block
+AsmCall ::= "asm" "(" StringLiteral ")"

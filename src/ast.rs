@@ -23,6 +23,17 @@ pub enum AstNode {
         name: String,
         args: Vec<AstNode>,
     },
+    /// ST-02: Total EBNF Grammar representation nodes
+    AssignmentNode {
+        target: String,
+        value: Box<AstNode>,
+    },
+    ReturnNode {
+        value: Box<AstNode>,
+    },
+    UnsafeBlockNode {
+        body: Vec<AstNode>,
+    },
 }
 
 pub struct MacroExpansionEngine;

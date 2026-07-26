@@ -1,0 +1,16 @@
+// ST-04: std::math - Core Mathematics
+
+routine abs(x) {
+    // Branchless absolute value
+    unsafe {
+        reg mask = x >> 63
+        return (x ^ mask) - mask
+    }
+}
+
+routine max(a, b) {
+    unsafe {
+        // Reuse swar_conditional from magic.alu
+        return swar_conditional(a, b, a, b)
+    }
+}
