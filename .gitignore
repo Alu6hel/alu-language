@@ -58,3 +58,7 @@ crash_reports/
 *.swo
 .vscode/
 .idea/
+.vs/
+
+# Zip files
+*.zip
