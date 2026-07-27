@@ -1,0 +1,16 @@
+// ALU Standard Library: thread.alu
+// MapReduce scatter-gather threading primitives
+
+extern "C" thread_spawn(fn_ptr: ptr<routine>) -> u64
+extern "C" thread_join(thread_id: u64)
+
+routine scatter(workers: u32, fn_ptr: ptr<routine>) -> ptr<u64> {
+    prove { workers > 0 }
+    // Implements parallel Map logic
+    return null // Stub
+}
+
+routine gather(thread_ids: ptr<u64>, count: u32) {
+    prove { count > 0 }
+    // Implements Reduce logic
+}

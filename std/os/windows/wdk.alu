@@ -1,32 +1,26 @@
 // ALU Standard Library: os/windows/wdk.alu
-// Definitions for Windows Kernel Development (Ring-0)
+// Windows Driver Kit (WDK) Ring-0 Definitions
 
-namespace std::os::windows::wdk
-
-// NTSTATUS error codes
-pub const STATUS_SUCCESS: i32 = 0x00000000
-pub const STATUS_UNSUCCESSFUL: i32 = 0xC0000001
-
-pub struct UnicodeString {
-    length: u16,
-    maximum_length: u16,
-    buffer: ptr<char>, // Capability pointer to string buffer
+// Equivalent to PDRIVER_OBJECT
+struct DriverObject {
+    reg device_object: ptr<u8>
+    reg driver_extension: ptr<u8>
+    reg hardware_database: ptr<u8>
+    reg fast_io_dispatch: ptr<u8>
 }
 
-pub struct DriverObject {
-    driver_start: ptr<u8>,
-    driver_size: u32,
-    driver_name: UnicodeString,
-    // SFI-protected function pointers for IRQL dispatch
-    driver_unload: ptr<routine>, 
+// Equivalent to PIRP
+struct Irp {
+    reg type: u16
+    reg size: u16
+    reg mdl_address: ptr<u8>
+    reg flags: u32
 }
 
-pub struct Irp {
-    io_status_block: u64,
-    system_buffer: ptr<u8>, 
+extern "C" IoCreateDevice(driver: ptr<DriverObject>, ext_size: u32, name: ptr<u8>, type: u32, chars: u32, excl: bool, device: ptr<ptr<u8>>) -> u32
+extern "C" IoCompleteRequest(irp: ptr<Irp>, priority: u8)
+
+routine secure_io_complete(irp: ptr<Irp>) {
+    prove { irp != null }
+    IoCompleteRequest(irp, 0)
 }
-
-// OS Hooks
-pub extern "system" routine IoCreateDevice(driver: ptr<DriverObject>, size: u32, name: ptr<UnicodeString>, dev_type: u32, chars: u32, exclusive: bool, dev_out: ptr<u64>) -> i32
-
-pub extern "system" routine IoCompleteRequest(irp: ptr<Irp>, priority_boost: i8)

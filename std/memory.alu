@@ -1,0 +1,18 @@
+// ALU Standard Library: memory.alu
+// Hoare-logic verified memory allocators
+
+extern "C" alloc(size: u64) -> ptr<u8>
+extern "C" free(memory_ptr: ptr<u8>)
+
+// Math-verified memory allocation routine
+routine safe_alloc(size: u64) -> ptr<u8> {
+    prove { size > 0 }
+    reg p = alloc(size)
+    prove { p != null }
+    return p
+}
+
+routine safe_free(p: ptr<u8>) {
+    prove { p != null }
+    free(p)
+}

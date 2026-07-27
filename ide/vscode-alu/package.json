@@ -1,0 +1,36 @@
+{
+  "name": "vscode-alu",
+  "displayName": "ALU Language Support",
+  "description": "Syntax highlighting and LSP for the ALU Systems Language",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "alu",
+        "aliases": ["ALU", "alu"],
+        "extensions": [".alu"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "alu",
+        "scopeName": "source.alu",
+        "path": "./syntaxes/alu.tmLanguage.json"
+      }
+    ]
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:alu"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  }
+}

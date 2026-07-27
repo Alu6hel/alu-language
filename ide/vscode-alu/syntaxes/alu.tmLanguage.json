@@ -1,0 +1,27 @@
+{
+  "name": "ALU",
+  "scopeName": "source.alu",
+  "patterns": [
+    {
+      "match": "\\b(routine|import|reg|prove|return|extern|struct|if|else|while|true|false)\\b",
+      "name": "keyword.control.alu"
+    },
+    {
+      "match": "\\b(u8|u16|u32|u64|bool|ptr|string)\\b",
+      "name": "support.type.alu"
+    },
+    {
+      "match": "//.*$",
+      "name": "comment.line.double-slash.alu"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.alu"
+    },
+    {
+      "match": "\\b[0-9]+\\b",
+      "name": "constant.numeric.alu"
+    }
+  ]
+}
