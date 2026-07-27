@@ -3,8 +3,15 @@ use std::collections::HashMap;
 /// Slice 8: Control Flow Graph (CFG) & SSA Form
 #[derive(Debug, PartialEq)]
 pub enum SsaInstruction {
-    Assign { var: String, val: i64 },
-    MemorySafeRead { dest_var: String, cap_base: String, offset: i64 },
+    Assign {
+        var: String,
+        val: i64,
+    },
+    MemorySafeRead {
+        dest_var: String,
+        cap_base: String,
+        offset: i64,
+    },
 }
 
 pub struct CfgNode {
@@ -29,9 +36,13 @@ impl RegisterAllocator {
 
         for instr in &cfg.instructions {
             match instr {
-                SsaInstruction::Assign { var, .. } | SsaInstruction::MemorySafeRead { dest_var: var, .. } => {
+                SsaInstruction::Assign { var, .. }
+                | SsaInstruction::MemorySafeRead { dest_var: var, .. } => {
                     if !self.allocation.contains_key(var) {
-                        self.allocation.insert(var.clone(), registers[reg_idx % registers.len()].to_string());
+                        self.allocation.insert(
+                            var.clone(),
+                            registers[reg_idx % registers.len()].to_string(),
+                        );
                         reg_idx += 1;
                     }
                 }
@@ -51,18 +62,33 @@ impl X86Emitter {
         for instr in &cfg.instructions {
             match instr {
                 SsaInstruction::Assign { var, val } => {
-                    let reg = allocator.allocation.get(var).unwrap_or(&"r8".to_string()).clone();
+                    let reg = allocator
+                        .allocation
+                        .get(var)
+                        .unwrap_or(&"r8".to_string())
+                        .clone();
                     assembly.push_str(&format!("  mov {}, {}\n", reg, val));
                 }
-                SsaInstruction::MemorySafeRead { dest_var, cap_base, offset } => {
-                    let reg = allocator.allocation.get(dest_var).unwrap_or(&"r8".to_string()).clone();
+                SsaInstruction::MemorySafeRead {
+                    dest_var,
+                    cap_base,
+                    offset,
+                } => {
+                    let reg = allocator
+                        .allocation
+                        .get(dest_var)
+                        .unwrap_or(&"r8".to_string())
+                        .clone();
                     // Simulated memory safe read macro/inline assembly
-                    assembly.push_str(&format!("  ; memory_safe_read from {} + {}\n", cap_base, offset));
+                    assembly.push_str(&format!(
+                        "  ; memory_safe_read from {} + {}\n",
+                        cap_base, offset
+                    ));
                     assembly.push_str(&format!("  mov {}, [{} + {}]\n", reg, cap_base, offset));
                 }
             }
         }
-        
+
         assembly
     }
 }
@@ -75,7 +101,10 @@ mod tests {
     fn test_slice_8_9_10() {
         let cfg = CfgNode {
             instructions: vec![
-                SsaInstruction::Assign { var: "v0".to_string(), val: 42 },
+                SsaInstruction::Assign {
+                    var: "v0".to_string(),
+                    val: 42,
+                },
                 SsaInstruction::MemorySafeRead {
                     dest_var: "v1".to_string(),
                     cap_base: "vga_buf".to_string(),
@@ -86,7 +115,7 @@ mod tests {
 
         let mut allocator = RegisterAllocator::new();
         allocator.allocate(&cfg);
-        
+
         assert_eq!(allocator.allocation.get("v0").unwrap(), "rax");
         assert_eq!(allocator.allocation.get("v1").unwrap(), "rbx");
 

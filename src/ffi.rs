@@ -19,4 +19,10 @@ impl FfiTrampoline {
         
         asm
     }
+
+    /// Task 3: Syscall Interception Layer for Aegis AV
+    pub fn hook_ntdll(syscall_name: &str) {
+        println!("Hooking Windows Native API: {}", syscall_name);
+        // Intercept C-pointers, elevate to Software CHERI capability, and verify against ALU bounds
+    }
 }
