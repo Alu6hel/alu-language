@@ -1,0 +1,4 @@
+[project]
+name="test_project"
+[dependencies]
+std = "file:///C:/Users/Alu/source/repos/Alu6hel/alu-std"

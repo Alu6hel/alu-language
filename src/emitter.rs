@@ -21,6 +21,9 @@ impl Emitter {
     pub fn generate_llvm_ir(&self, ast: &Vec<ASTNode>) -> String {
         let mut ir = String::new();
         
+        // Target Configuration (ALU Mobile Support)
+        ir.push_str("target triple = \"aarch64-unknown-linux-android\"\n\n");
+
         // Headers
         ir.push_str("declare i32 @puts(ptr)\n");
         ir.push_str("declare ptr @malloc(i64)\n\n");
@@ -121,8 +124,17 @@ impl Emitter {
             ASTNode::Return { value } => {
                 ir.push_str(&format!("  ret i32 {}\n", value));
             }
+            ASTNode::Spawn { thread_id, body } => {
+                ir.push_str(&format!("; spawn thread {}\n", thread_id));
+                for child in body {
+                    ir.push_str(&self.emit_node(child, label_counter));
+                }
+            }
+            ASTNode::Lock { mutex_name } => {
+                ir.push_str(&format!("; lock mutex {}\n", mutex_name));
+            }
             ASTNode::Unknown { text } => {
-                ir.push_str(&format!("  ; unknown node: {}\n", text));
+                ir.push_str(&format!("; WARNING: Unrecognized instruction '{}'\n", text));
             }
         }
         ir

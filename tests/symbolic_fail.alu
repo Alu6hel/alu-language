@@ -1,0 +1,22 @@
+// ALU Test: Advanced Z3 Symbolic Execution Failure
+
+@requires("size > 0")
+routine allocate_buffer(size) {
+    let buf = alloc(size);
+    return buf;
+}
+
+routine main() {
+    let idx = 0;
+    
+    // Z3 Loop Invariant checking should catch if we allocate out of bounds
+    loop {
+        // Will mathematically fail Z3 because size is conditional and goes negative
+        if (idx > 500) {
+            allocate_buffer(-10);
+        } else {
+            allocate_buffer(1024);
+        }
+        idx = idx + 1;
+    }
+}

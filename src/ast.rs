@@ -11,6 +11,8 @@ pub enum ASTNode {
     Condition { check: String, body: Vec<ASTNode> },
     Return { value: String },
     WriteJSON { file: String, status: String },
+    Spawn { thread_id: String, body: Vec<ASTNode> },
+    Lock { mutex_name: String },
     Unknown { text: String },
 }
 
