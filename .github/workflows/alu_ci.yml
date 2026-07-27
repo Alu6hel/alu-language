@@ -1,0 +1,27 @@
+name: ALU Compiler CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build & Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Build ALU Toolchain
+      run: cargo build --verbose
+      
+    - name: Run ALU Core Tests
+      run: cargo test --verbose

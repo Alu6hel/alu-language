@@ -1,0 +1,6 @@
+routine main() {
+    // Basic ALU "Hello World"
+    unsafe {
+        asm("print 'Hello from the ALU Bare-Metal Runtime!'")
+    }
+}

@@ -1,0 +1,8 @@
+routine calculate_node_data(data_ptr) {
+    swarm {
+        // This block is securely serialized and sent across the TCP Swarm Array
+        // CHERI capability bounds are transmitted alongside the logic
+        reg result = (data_ptr) * 0x5f3759df
+        return result
+    }
+}

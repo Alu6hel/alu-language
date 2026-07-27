@@ -1,0 +1,13 @@
+// ST-03: Distributed Swarm Networking
+
+routine swarm_broadcast(payload) {
+    // Zero-trust capabilities transferred over TCP MapReduce
+    @requires payload != null
+    
+    unsafe {
+        // Linear logic enforcement: the payload is consumed and serialized
+        asm("swarm_serialize payload")
+        asm("call_trampoline TCP_BROADCAST")
+        return 1
+    }
+}

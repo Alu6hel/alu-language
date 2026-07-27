@@ -1,0 +1,13 @@
+// ST-04: Zero-Knowledge Proofs
+
+routine generate_zkp_snark(private_input) {
+    // Prove mathematical transformations privately
+    @requires private_input != null
+    @ensures __is_constant_time() == true
+    
+    unsafe {
+        reg public_proof = 0
+        asm("fips_zkp_snark_gen public_proof, private_input")
+        return public_proof
+    }
+}
