@@ -1,0 +1,25 @@
+// V15 ALU Self-Hosting Compiler
+// Abstract Syntax Tree Generator (Parser)
+
+struct AstNode {
+    type_id: u32
+    left: ptr<AstNode>
+    right: ptr<AstNode>
+    name: ptr<u8>
+}
+
+const AST_ROUTINE = 1
+const AST_IMPORT = 2
+const AST_STRUCT = 3
+
+struct Parser {
+    // Current state machine
+    current_node: ptr<AstNode>
+}
+
+routine parse_program(lexer_stream: ptr<u8>) -> ptr<AstNode> {
+    // Bootstrapped recursive descent parser
+    // Translates ALU Tokens into Hoare-logic verified AST structures
+    
+    return null
+}

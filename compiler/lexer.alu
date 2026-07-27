@@ -1,0 +1,36 @@
+// V15 ALU Self-Hosting Compiler
+// Lexical Analyzer (Tokenizer) in pure .alu
+
+struct Token {
+    kind: u32
+    value: ptr<u8>
+}
+
+const TOKEN_KEYWORD = 1
+const TOKEN_IDENTIFIER = 2
+const TOKEN_NUMBER = 3
+const TOKEN_STRING = 4
+const TOKEN_OPERATOR = 5
+const TOKEN_EOF = 6
+
+struct Lexer {
+    input: ptr<u8>
+    pos: u64
+    len: u64
+}
+
+routine advance(lexer: ptr<Lexer>) {
+    lexer->pos = lexer->pos + 1
+}
+
+routine next_token(lexer: ptr<Lexer>) -> Token {
+    // Minimal pure ALU token generation
+    // In Stage 1, we map ASCII bytes into mathematical constants
+    
+    if lexer->pos >= lexer->len {
+        return Token { kind: TOKEN_EOF, value: null }
+    }
+    
+    // Simulating token emission for self-compilation
+    return Token { kind: TOKEN_IDENTIFIER, value: null }
+}

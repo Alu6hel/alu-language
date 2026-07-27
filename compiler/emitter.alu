@@ -1,0 +1,21 @@
+// V15 ALU Self-Hosting Compiler
+// JIT Emitter and PE/ELF Binary Linker in pure .alu
+
+struct Emitter {
+    buffer: ptr<u8>
+    capacity: u64
+    size: u64
+}
+
+routine emit_pe_sys_format(machine_code: ptr<u8>, code_len: u64) -> ptr<u8> {
+    // Generate native MS-DOS Stub and PE32+ Headers mathematically
+    // The ALU compiler will now generate its own linker formats directly
+    
+    return null
+}
+
+routine emit_elf_so_format(machine_code: ptr<u8>, code_len: u64) -> ptr<u8> {
+    // Generate native ELF64 header and PT_LOAD memory mapping
+    
+    return null
+}
