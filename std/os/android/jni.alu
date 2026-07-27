@@ -12,9 +12,22 @@ pub struct JObject {
     reference: u64,
 }
 
+pub struct JClass {
+    reference: u64,
+}
+
+pub struct JMethodID {
+    reference: u64,
+}
+
 pub struct JavaVM {
     functions: ptr<u64>,
 }
+
+// JVM Interface Functions
+pub extern "system" routine FindClass(env: ptr<JNIEnv>, name: ptr<u8>) -> ptr<JClass>
+pub extern "system" routine GetMethodID(env: ptr<JNIEnv>, class: ptr<JClass>, name: ptr<u8>, sig: ptr<u8>) -> ptr<JMethodID>
+pub extern "system" routine CallVoidMethod(env: ptr<JNIEnv>, obj: ptr<JObject>, methodID: ptr<JMethodID>) -> void
 
 // OS Hooks
 // The standard JNI_OnLoad hook that the Android OS looks for when loading an .so

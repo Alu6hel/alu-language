@@ -94,7 +94,7 @@ impl<'a> Lexer<'a> {
         }
 
         match result.as_str() {
-            "import" | "routine" | "extern" | "struct" | "pub" | "const" | "namespace" | "@requires" | "@ensures" | "return" => {
+            "import" | "routine" | "extern" | "struct" | "pub" | "const" | "namespace" | "@requires" | "@ensures" | "return" | "reg" | "while" | "if" | "else" | "true" | "false" => {
                 Token::Keyword(result)
             }
             _ => Token::Identifier(result),

@@ -18,17 +18,35 @@ fn main() {
                 println!("Error: Missing input file.");
                 return;
             }
-            let input_file = &args[2];
-            println!("[Stage 0.5] Parsing and transpiling {} to C...", input_file);
+            let mut input_file = args[2].clone();
+            let mut is_android = false;
             
-            // 1. Lexing (Stubbed for demo)
-            let tokens = vec![]; 
+            if input_file == "--android" {
+                is_android = true;
+                if args.len() < 4 {
+                    println!("Error: Missing input file after --android.");
+                    return;
+                }
+                input_file = args[3].clone();
+            }
+
+            println!("[Stage 1.0] Parsing and lowering {} to LLVM IR...", input_file);
             
-            // 2. Dynamic AST Parsing
+            let source_code = std::fs::read_to_string(&input_file).expect("Failed to read input file");
+            
+            let mut lexer = alu_language::lexer::Lexer::new(&source_code);
+            let mut tokens = Vec::new();
+            loop {
+                let token = lexer.next_token();
+                if token == alu_language::lexer::Token::EOF {
+                    break;
+                }
+                tokens.push(token);
+            }
+            
             let mut parser = Parser::new(tokens);
             let ast = parser.parse();
 
-            // 2.5 Mathematical Verification
             let verifier = alu_language::verifier::Verifier::new();
             if let Err(e) = verifier.verify_ast(&ast) {
                 eprintln!("[ALU Verifier Error] {}", e);
@@ -36,32 +54,54 @@ fn main() {
                 std::process::exit(1);
             }
             
-            // 3. Dynamic C Emission
+            // 3. LLVM IR Emission
             let emitter = Emitter::new();
-            let c_code = emitter.walk_ast_to_c(&ast);
+            let llvm_ir = emitter.generate_llvm_ir(&ast);
             
-            let c_filename = input_file.replace(".alu", ".c");
-            let exe_filename = input_file.replace(".alu", ".exe");
+            let ll_filename = input_file.replace(".alu", ".ll");
+            let exe_filename = if is_android {
+                input_file.replace(".alu", ".so")
+            } else {
+                input_file.replace(".alu", ".exe")
+            };
             
-            fs::write(&c_filename, c_code).expect("Failed to write .c file");
-            println!("[Stage 0.5] Successfully generated {}", c_filename);
+            fs::write(&ll_filename, llvm_ir).expect("Failed to write .ll file");
+            println!("[Stage 1.0] Successfully generated LLVM IR at {}", ll_filename);
             
-            // 4. Compile using GCC
-            println!("[Stage 0.5] Invoking GCC to generate native executable...");
-            let status = Command::new("gcc")
-                .arg(&c_filename)
-                .arg("-o")
-                .arg(&exe_filename)
-                .status();
+            // 4. Compile using clang/LLVM linker
+            println!("[Stage 1.0] Invoking LLVM backend to generate native binary...");
+            let mut cmd = Command::new("clang");
+            cmd.arg(&ll_filename);
+            
+            if is_android {
+                cmd.arg("-shared");
+                cmd.arg("-target");
+                cmd.arg("aarch64-linux-android");
+            }
+            
+            cmd.arg("-o").arg(&exe_filename);
+            let status = cmd.status();
                 
             match status {
                 Ok(s) if s.success() => {
-                    println!("[Stage 0.5] SUCCESS! Native binary {} created.", exe_filename);
+                    println!("[Stage 1.0] SUCCESS! Native binary {} created.", exe_filename);
                 }
                 _ => {
-                    println!("[!] GCC not found or failed. The transpiled C code is ready at {}.", c_filename);
+                    println!("[!] LLVM tools not found or failed. The generated LLVM IR is ready at {}.", ll_filename);
                 }
             }
+        }
+        "pack" => {
+            if args.len() < 4 {
+                println!("Usage: alu pack <project.toml> --target=<windows-msi|android>");
+                return;
+            }
+            let project_file = &args[2];
+            let target_arg = &args[3];
+            let target = target_arg.replace("--target=", "");
+            
+            let packager = alu_language::packager::Packager::new();
+            packager.pack(project_file, &target);
         }
         "init" => {
             let pm = alu_language::package_manager::PackageManager::new();

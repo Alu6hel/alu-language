@@ -1,0 +1,4 @@
+routine main() {
+    print("Testing verifier")
+    reg buffer = alloc(-10)
+}

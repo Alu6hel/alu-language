@@ -4,7 +4,7 @@ import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-lan
 let client: LanguageClient;
 
 export function activate(context: vscode.ExtensionContext) {
-    const serverExecutable = 'alu'; // Assumes alu.exe is in PATH
+    const serverExecutable = context.asAbsolutePath('../../target/debug/alu_cli.exe');
     const serverOptions: ServerOptions = {
         run: { command: serverExecutable, args: ['lsp'] },
         debug: { command: serverExecutable, args: ['lsp'] }

@@ -1,4 +1,5 @@
 use crate::emitter::{CfgNode, RegisterAllocator};
+use crate::ast::ASTNode;
 
 /// ST-05: FPGA Hardware Synthesis
 /// Emits Verilog bitstream source from ALU linear logic
@@ -6,7 +7,7 @@ use crate::emitter::{CfgNode, RegisterAllocator};
 pub struct FpgaEmitter;
 
 impl FpgaEmitter {
-    pub fn emit(cfg: &CfgNode, _allocator: &RegisterAllocator) -> String {
+    pub fn emit(ast: &Vec<ASTNode>) -> String {
         let mut verilog = String::new();
         
         verilog.push_str("module alu_fpga_core (\n");
@@ -15,6 +16,18 @@ impl FpgaEmitter {
         verilog.push_str("    output reg [127:0] out_capability\n");
         verilog.push_str(");\n\n");
         
+        // Setup internal wires
+        for node in ast {
+            if let ASTNode::Routine { name: _, requires: _, ensures: _, body } = node {
+                for child in body {
+                    if let ASTNode::VariableDecl { name, value: _ } = child {
+                        verilog.push_str(&format!("wire [63:0] {};\n", name));
+                    }
+                }
+            }
+        }
+        verilog.push_str("\n");
+        
         verilog.push_str("always @(posedge clk) begin\n");
         verilog.push_str("    if (rst) begin\n");
         verilog.push_str("        out_capability <= 128'b0;\n");
@@ -22,6 +35,17 @@ impl FpgaEmitter {
         
         // Map AST/CFG to hardware logic gates
         verilog.push_str("        // Synthesized ALU Linear Logic\n");
+        for node in ast {
+            if let ASTNode::Routine { name: _, requires: _, ensures: _, body } = node {
+                for child in body {
+                    if let ASTNode::Condition { check, body: _ } = child {
+                        verilog.push_str(&format!("        if ({}) begin\n", check));
+                        verilog.push_str("            out_capability <= 128'hFFFFFFFFFFFFFFFF;\n");
+                        verilog.push_str("        end\n");
+                    }
+                }
+            }
+        }
         
         verilog.push_str("    end\n");
         verilog.push_str("end\n\n");

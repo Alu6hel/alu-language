@@ -10,3 +10,5 @@ pub mod ffi;
 pub mod fpga_emitter;
 pub mod hot_swap;
 pub mod types;
+pub mod packager;
+pub mod thread_pool;
