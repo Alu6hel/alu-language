@@ -9,6 +9,7 @@ pub enum ASTNode {
     Loop { body: Vec<ASTNode> },
     Condition { check: String, body: Vec<ASTNode> },
     Return { value: String },
+    WriteJSON { file: String, status: String },
     Unknown { text: String },
 }
 
@@ -40,7 +41,8 @@ impl Parser {
                         ASTNode::Condition {
                             check: "!is_safe".to_string(),
                             body: vec![
-                                ASTNode::Print { message: "[Aegis Daemon] THREAT NEUTRALIZED LOCALLY!".to_string() }
+                                ASTNode::Print { message: "[Aegis Daemon] THREAT NEUTRALIZED LOCALLY!".to_string() },
+                                ASTNode::WriteJSON { file: "dashboard/aegis_status.json".to_string(), status: "THREAT_NEUTRALIZED".to_string() }
                             ]
                         }
                     ]

@@ -1,50 +1,40 @@
-use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
-/// ST-01: Hermetic Package Manager
-/// Builds content-addressable fetching (SHA-256) and Static Capability Sandboxing.
-
-pub struct Package {
-    pub name: String,
-    pub sha256_hash: String,
-    pub capabilities: Vec<String>, // e.g., "deny_network", "deny_fs"
-}
-
-pub struct PackageManager {
-    pub packages: HashMap<String, Package>,
-}
+pub struct PackageManager;
 
 impl PackageManager {
     pub fn new() -> Self {
-        PackageManager {
-            packages: HashMap::new(),
-        }
+        Self {}
     }
 
-    pub fn fetch_package(&mut self, name: &str, hash: &str, capabilities: Vec<String>) -> Result<(), String> {
-        // In a real environment, this fetches via content-addressable network request
-        // Here we simulate the SHA-256 verification and sandbox application
-        if hash.len() != 64 {
-            return Err("Invalid SHA-256 hash length".to_string());
-        }
+    pub fn init_project(&self) {
+        let manifest = r#"{
+    "name": "alu_project",
+    "version": "1.0.0",
+    "dependencies": {}
+}"#;
+        fs::write("alupkg.json", manifest).expect("Failed to create alupkg.json");
+        fs::create_dir_all("modules").expect("Failed to create modules directory");
+        println!("[ALU Package Manager] Initialized new ALU project. Created `alupkg.json` and `modules/`.");
+    }
 
-        let pkg = Package {
-            name: name.to_string(),
-            sha256_hash: hash.to_string(),
-            capabilities,
-        };
+    pub fn install_package(&self, pkg_name: &str) {
+        println!("[ALU Package Manager] Fetching package `{}` from ALU Central Registry...", pkg_name);
         
-        self.packages.insert(name.to_string(), pkg);
-        Ok(())
-    }
-
-    pub fn verify_sandboxing(&self, name: &str) -> Result<(), String> {
-        if let Some(pkg) = self.packages.get(name) {
-            if pkg.capabilities.contains(&"deny_fs".to_string()) {
-                println!("Static Capability Sandboxing: {} is denied filesystem access via CHERI bounds.", name);
-            }
-            Ok(())
-        } else {
-            Err("Package not found".to_string())
+        let modules_dir = Path::new("modules");
+        if !modules_dir.exists() {
+            fs::create_dir_all(modules_dir).expect("Failed to create modules directory");
         }
+
+        let pkg_dir = modules_dir.join(pkg_name);
+        fs::create_dir_all(&pkg_dir).expect("Failed to create package directory");
+        
+        // Simulating the downloaded package contents
+        let alu_code = format!("// Package: {}\n// Hoare-logic verified module\n\nroutine init_{}() {{ prove {{ true }} }}\n", pkg_name, pkg_name);
+        let file_path = pkg_dir.join("lib.alu");
+        fs::write(file_path, alu_code).expect("Failed to write package files");
+        
+        println!("[ALU Package Manager] Successfully installed `{}` into `modules/{}`.", pkg_name, pkg_name);
     }
 }

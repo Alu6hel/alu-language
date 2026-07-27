@@ -27,6 +27,14 @@ fn main() {
             // 2. Dynamic AST Parsing
             let mut parser = Parser::new(tokens);
             let ast = parser.parse();
+
+            // 2.5 Mathematical Verification
+            let verifier = alu_language::verifier::Verifier::new();
+            if let Err(e) = verifier.verify_ast(&ast) {
+                eprintln!("[ALU Verifier Error] {}", e);
+                eprintln!("Compilation halted. Math must prove.");
+                std::process::exit(1);
+            }
             
             // 3. Dynamic C Emission
             let emitter = Emitter::new();
@@ -54,6 +62,19 @@ fn main() {
                     println!("[!] GCC not found or failed. The transpiled C code is ready at {}.", c_filename);
                 }
             }
+        }
+        "init" => {
+            let pm = alu_language::package_manager::PackageManager::new();
+            pm.init_project();
+        }
+        "install" => {
+            if args.len() < 3 {
+                println!("Error: Missing package name.");
+                return;
+            }
+            let pkg_name = &args[2];
+            let pm = alu_language::package_manager::PackageManager::new();
+            pm.install_package(pkg_name);
         }
         "lsp" => {
             alu_language::lsp::run_lsp_server();

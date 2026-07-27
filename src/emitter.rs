@@ -63,7 +63,14 @@ impl Emitter {
                 }
                 c_code.push_str(&format!("{}}}\n", prefix));
             }
+            ASTNode::WriteJSON { file, status } => {
+                c_code.push_str(&format!("{}FILE* f = fopen(\"{}\", \"w\");\n", prefix, file));
+                c_code.push_str(&format!("{}if (f) {{ fprintf(f, \"{{\\\"status\\\": \\\"{}\\\"}}\\n\"); fclose(f); }}\n", prefix, status));
+            }
             _ => {}
         }
     }
 }
+
+pub struct CfgNode;
+pub struct RegisterAllocator;
