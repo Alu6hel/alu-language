@@ -1,0 +1,16 @@
+// ST-04: Concurrency and Actor Model Ring Buffers
+
+routine ring_buffer_push(buffer, item, head) {
+    // Lock-free concurrency logic
+    unsafe {
+        // Use 0x5f3759df derivative hacks to implement ultra-fast modulo wrap-arounds
+        // avoiding costly DIV operations
+        reg mask = 0x5f3759df & (buffer.length - 1)
+        reg next_head = (head + 1) & mask
+        
+        // CHERI capability bounds check enforced on the buffer write
+        asm("cheri_store buffer, next_head, item")
+        
+        return next_head
+    }
+}

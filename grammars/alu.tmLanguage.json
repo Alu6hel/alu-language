@@ -1,0 +1,10 @@
+{
+  "name": "ALU",
+  "scopeName": "source.alu",
+  "patterns": [
+    {
+      "name": "keyword.control.alu",
+      "match": "\b(fn|return|let|mut|if|else)\b"
+    }
+  ]
+}
