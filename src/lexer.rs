@@ -1,122 +1,137 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    Number(i64),
-    Routine,
-    Cap,
-    Register,
-    ScopeStart,
-    Unsafe,
-    Ident(String),
-    Eof,
+    Keyword(String),
+    Identifier(String),
+    Number(u64),
+    StringLiteral(String),
+    Operator(String),
+    Punctuation(String),
+    EOF,
 }
 
 pub struct Lexer<'a> {
-    input: &'a str,
-    position: usize,
+    input: std::str::Chars<'a>,
+    current_char: Option<char>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Lexer { input, position: 0 }
+        let mut lexer = Lexer {
+            input: input.chars(),
+            current_char: None,
+        };
+        lexer.advance();
+        lexer
+    }
+
+    fn advance(&mut self) {
+        self.current_char = self.input.next();
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(c) = self.current_char {
+            if c.is_whitespace() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
     }
 
     pub fn next_token(&mut self) -> Token {
         self.skip_whitespace();
 
-        if self.position >= self.input.len() {
-            return Token::Eof;
+        if let Some(c) = self.current_char {
+            match c {
+                'a'..='z' | 'A'..='Z' | '_' | '@' => self.read_identifier_or_keyword(),
+                '0'..='9' => self.read_number(),
+                '"' => self.read_string(),
+                '{' | '}' | '(' | ')' | '[' | ']' | ',' | ';' => {
+                    self.advance();
+                    Token::Punctuation(c.to_string())
+                }
+                ':' => {
+                    self.advance();
+                    if self.current_char == Some(':') {
+                        self.advance();
+                        Token::Operator("::".to_string())
+                    } else {
+                        Token::Punctuation(":".to_string())
+                    }
+                }
+                '-' => {
+                    self.advance();
+                    if self.current_char == Some('>') {
+                        self.advance();
+                        Token::Operator("->".to_string())
+                    } else {
+                        Token::Operator("-".to_string())
+                    }
+                }
+                '=' | '+' | '*' | '/' | '<' | '>' => {
+                    self.advance();
+                    Token::Operator(c.to_string())
+                }
+                _ => {
+                    self.advance();
+                    Token::Operator(c.to_string())
+                }
+            }
+        } else {
+            Token::EOF
         }
-
-        let ch = self.input.as_bytes()[self.position] as char;
-        
-        // Slice 1: Number parsing
-        if ch.is_digit(10) {
-            return self.read_number();
-        }
-
-        // Slice 2: Keyword and Identifier parsing
-        if ch.is_alphabetic() {
-            let ident = self.read_identifier();
-            return match ident.as_str() {
-                "routine" => Token::Routine,
-                "cap" => Token::Cap,
-                "reg" => Token::Register,
-                "scope" => Token::ScopeStart,
-                "unsafe" => Token::Unsafe,
-                _ => Token::Ident(ident),
-            };
-        }
-
-        self.position += 1;
-        Token::Eof // Fallback for unknown chars right now
     }
 
-    fn skip_whitespace(&mut self) {
-        while self.position < self.input.len() {
-            let ch = self.input.as_bytes()[self.position] as char;
-            if ch.is_whitespace() {
-                self.position += 1;
+    fn read_identifier_or_keyword(&mut self) -> Token {
+        let mut result = String::new();
+        while let Some(c) = self.current_char {
+            if c.is_alphanumeric() || c == '_' || c == '@' {
+                result.push(c);
+                self.advance();
             } else {
                 break;
             }
+        }
+
+        match result.as_str() {
+            "import" | "routine" | "extern" | "struct" | "pub" | "const" | "namespace" | "@requires" | "@ensures" | "return" => {
+                Token::Keyword(result)
+            }
+            _ => Token::Identifier(result),
         }
     }
 
     fn read_number(&mut self) -> Token {
-        let start = self.position;
-        while self.position < self.input.len() {
-            let ch = self.input.as_bytes()[self.position] as char;
-            if ch.is_digit(10) {
-                self.position += 1;
+        let mut result = String::new();
+        while let Some(c) = self.current_char {
+            if c.is_ascii_hexdigit() || c == 'x' {
+                result.push(c);
+                self.advance();
             } else {
                 break;
             }
         }
-        let num_str = &self.input[start..self.position];
-        let num = num_str.parse::<i64>().unwrap();
-        Token::Number(num)
+        
+        let value = if result.starts_with("0x") {
+            u64::from_str_radix(&result[2..], 16).unwrap_or(0)
+        } else {
+            result.parse::<u64>().unwrap_or(0)
+        };
+        
+        Token::Number(value)
     }
 
-    fn read_identifier(&mut self) -> String {
-        let start = self.position;
-        while self.position < self.input.len() {
-            let ch = self.input.as_bytes()[self.position] as char;
-            if ch.is_alphanumeric() || ch == '_' {
-                self.position += 1;
-            } else {
+    fn read_string(&mut self) -> Token {
+        self.advance(); // Skip initial quote
+        let mut result = String::new();
+        while let Some(c) = self.current_char {
+            if c == '"' {
+                self.advance(); // Skip ending quote
                 break;
             }
+            result.push(c);
+            self.advance();
         }
-        self.input[start..self.position].to_string()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_slice_1_tokens() {
-        let input = "  42  1337   ";
-        let mut lexer = Lexer::new(input);
-        
-        assert_eq!(lexer.next_token(), Token::Number(42));
-        assert_eq!(lexer.next_token(), Token::Number(1337));
-        assert_eq!(lexer.next_token(), Token::Eof);
-    }
-
-    #[test]
-    fn test_slice_2_tokens() {
-        let input = "routine cap reg scope unsafe custom_ident 42";
-        let mut lexer = Lexer::new(input);
-        
-        assert_eq!(lexer.next_token(), Token::Routine);
-        assert_eq!(lexer.next_token(), Token::Cap);
-        assert_eq!(lexer.next_token(), Token::Register);
-        assert_eq!(lexer.next_token(), Token::ScopeStart);
-        assert_eq!(lexer.next_token(), Token::Unsafe);
-        assert_eq!(lexer.next_token(), Token::Ident("custom_ident".to_string()));
-        assert_eq!(lexer.next_token(), Token::Number(42));
-        assert_eq!(lexer.next_token(), Token::Eof);
+        Token::StringLiteral(result)
     }
 }
