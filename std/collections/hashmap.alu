@@ -1,0 +1,11 @@
+// ST-04: Dictionary (HashMap)
+
+struct HashMap<K, V> {
+    buckets: Capability128,
+    size: u64,
+}
+
+routine insert<K, V>(map: &mut HashMap<K, V>, key: K, value: V) {
+    // Hash key (using ALU post-quantum SHA-3 if required)
+    // Map to bucket
+}

@@ -1,0 +1,18 @@
+// ST-02: Error Handling Syntax
+// Mathematically secure Result<T, E> equivalent
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+// Built-in `try!` macro equivalent mapped to Hoare-logic
+routine unwrap_or_trap<T, E>(res: Result<T, E>) -> T {
+    @ensures return != null // The caller knows it will either panic or return a valid T
+    
+    // ALU match syntax
+    match res {
+        Ok(val) => return val,
+        Err(err) => unsafe { asm("trap err_code") },
+    }
+}

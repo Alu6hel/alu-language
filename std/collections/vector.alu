@@ -1,0 +1,12 @@
+// ST-04: Dynamic Array (Vector)
+
+struct Vector<T> {
+    capacity: u64,
+    length: u64,
+    ptr: Capability128, // CHERI bounds track the allocation
+}
+
+routine push<T>(vec: &mut Vector<T>, item: T) {
+    // If length == capacity, allocate double memory and move capability bounds
+    // Otherwise, direct memory write inside capability bounds
+}

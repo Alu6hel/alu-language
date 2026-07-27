@@ -9,6 +9,7 @@ mod jit;
 mod ffi;
 mod fpga_emitter;
 mod hot_swap;
+mod types;
 
 fn main() {
     println!("ALU Compiler: Initialization Complete.");
