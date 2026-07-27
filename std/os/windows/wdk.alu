@@ -1,0 +1,32 @@
+// ALU Standard Library: os/windows/wdk.alu
+// Definitions for Windows Kernel Development (Ring-0)
+
+namespace std::os::windows::wdk
+
+// NTSTATUS error codes
+pub const STATUS_SUCCESS: i32 = 0x00000000
+pub const STATUS_UNSUCCESSFUL: i32 = 0xC0000001
+
+pub struct UnicodeString {
+    length: u16,
+    maximum_length: u16,
+    buffer: ptr<char>, // Capability pointer to string buffer
+}
+
+pub struct DriverObject {
+    driver_start: ptr<u8>,
+    driver_size: u32,
+    driver_name: UnicodeString,
+    // SFI-protected function pointers for IRQL dispatch
+    driver_unload: ptr<routine>, 
+}
+
+pub struct Irp {
+    io_status_block: u64,
+    system_buffer: ptr<u8>, 
+}
+
+// OS Hooks
+pub extern "system" routine IoCreateDevice(driver: ptr<DriverObject>, size: u32, name: ptr<UnicodeString>, dev_type: u32, chars: u32, exclusive: bool, dev_out: ptr<u64>) -> i32
+
+pub extern "system" routine IoCompleteRequest(irp: ptr<Irp>, priority_boost: i8)

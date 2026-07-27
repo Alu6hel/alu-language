@@ -1,0 +1,24 @@
+// ALU Standard Library: os/android/jni.alu
+// Definitions for Android OS JVM bridging
+
+namespace std::os::android::jni
+
+pub struct JNIEnv {
+    // SFI-protected function pointer table for JVM interaction
+    functions: ptr<u64>, 
+}
+
+pub struct JObject {
+    reference: u64,
+}
+
+pub struct JavaVM {
+    functions: ptr<u64>,
+}
+
+// OS Hooks
+// The standard JNI_OnLoad hook that the Android OS looks for when loading an .so
+pub extern "system" routine JNI_OnLoad(vm: ptr<JavaVM>, reserved: ptr<u8>) -> i32 {
+    // We return JNI_VERSION_1_6 to signal compatibility
+    return 0x00010006
+}
