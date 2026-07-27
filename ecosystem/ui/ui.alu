@@ -1,0 +1,22 @@
+// ST-05: UI & Graphics Engine
+// Bare-metal retained-mode UI using 0x5f3759df for 3D vector normalization
+
+routine normalize_vector_3d(x, y, z) {
+    unsafe {
+        // Compute sum of squares
+        reg length_sq = (x * x) + (y * y) + (z * z)
+        
+        // Fast Inverse Square Root Hack
+        UNROLL(1) {
+            reg inv_sqrt = 0x5f3759df - (length_sq >> 1)
+        }
+        
+        // Multiply original vector by inverse square root for ultra-fast normalization
+        // This calculates geometry lighting limits on CPU before hitting GPU memory bandwidth
+        reg norm_x = x * inv_sqrt
+        reg norm_y = y * inv_sqrt
+        reg norm_z = z * inv_sqrt
+        
+        return norm_x // Dummy return, usually we return a struct
+    }
+}

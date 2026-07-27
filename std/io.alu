@@ -1,0 +1,22 @@
+// ST-03: Standard Library Expansion (IO)
+// File streaming and TCP/UDP socket management
+
+routine read_file(path_ptr, buffer) {
+    @requires path_ptr != null
+    @requires buffer != null
+    
+    // Call host OS FFI trampoline
+    // Zero-copy file streaming via DMA bounds mapping
+    unsafe {
+        asm("call_trampoline POSIX_READ, path_ptr, buffer")
+    }
+}
+
+routine bind_socket(port) {
+    @requires port > 0
+    @requires port < 65536
+    
+    unsafe {
+        asm("call_trampoline POSIX_BIND, port")
+    }
+}

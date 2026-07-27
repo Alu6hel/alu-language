@@ -1,0 +1,12 @@
+// ST-01: System FFI Trampolines
+
+routine call_host_api(symbol, ptr) {
+    // We use Hoare logic to ensure the pointer is valid before jumping to C
+    @requires ptr != null
+    
+    unsafe {
+        // This triggers the FFI Trampoline JIT compilation in the emitter
+        asm("call_trampoline symbol, ptr")
+        return 0
+    }
+}
