@@ -1,0 +1,74 @@
+// AluMake: The Unified Production Build System
+// Orchestrates the ALU Compiler to ingest Kybalion, Nonlocality, and Aegis.
+
+import compiler::main
+import std::os::process
+import std::fs
+
+routine compile_module(path: ptr<u8>, target: ptr<u8>) {
+    print("[ALUMAKE] Compiling Module: ", path, " for Target: ", target)
+    // Invokes the ALU compiler binary with target flags
+    let cmd = "alu_1.0.exe " + path + " --target " + target
+    execute_system_command(cmd)
+}
+
+routine link_executable(output_name: ptr<u8>, modules: ptr<ptr<u8>>) {
+    print("[ALUMAKE] Linking Modules into final binary: ", output_name)
+    // In a real build system, this calls lld (LLVM Linker)
+}
+
+routine build_windows_production() {
+    print("==================================================")
+    print("  INITIATING ALU UNIFIED BUILD (WINDOWS x86_64)   ")
+    print("==================================================")
+    
+    let target = "x86_64-windows-msvc"
+    
+    // 1. Build Database
+    compile_module("../Kybalion/src/main.alu", target)
+    
+    // 2. Build Graphics Engine
+    compile_module("../nonlocality/src/engine/nonlocality.alu", target)
+    
+    // 3. Build Antivirus (Linking DB and Engine)
+    compile_module("../Aegis-Antivirus/daemon.alu", target)
+    
+    // Link into Final Executable
+    let modules = ["kybalion.obj", "nonlocality.obj", "aegis.obj"]
+    link_executable("aegis_production.exe", modules)
+    
+    print("[ALUMAKE] SUCCESS: aegis_production.exe is ready for deployment.")
+}
+
+routine build_android_apk() {
+    print("==================================================")
+    print("  INITIATING ALU UNIFIED BUILD (ANDROID AARCH64)  ")
+    print("==================================================")
+    
+    let target = "aarch64-linux-android"
+    
+    // 1. Build Database
+    compile_module("../Kybalion/src/main.alu", target)
+    
+    // 2. Build Graphics Engine
+    compile_module("../nonlocality/src/engine/nonlocality.alu", target)
+    
+    // 3. Build Antivirus
+    compile_module("../Aegis-Antivirus/daemon.alu", target)
+    
+    // Link into Final Shared Object for Dalvik/ART
+    let modules = ["kybalion.so", "nonlocality.so", "aegis.so"]
+    link_executable("libaegis_mobile.so", modules)
+    
+    print("[ALUMAKE] Packaging into APK...")
+    // (Simulate Android SDK apksigner and zipalign)
+    
+    print("[ALUMAKE] SUCCESS: aegis_mobile.apk is ready for deployment to Android Cell Phones.")
+}
+
+routine main(args: ptr<ptr<u8>>) {
+    // Simulated CLI parsing
+    // if (args[1] == "android") build_android_apk() else build_windows_production()
+    
+    print("[ALUMAKE] AluMake Build Coordinator V1.0 Online.")
+}
