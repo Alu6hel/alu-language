@@ -10,6 +10,8 @@ private:
     void advance();
     void expect(TokenType type);
     
+    std::unique_ptr<ASTNode> parseExpression();
+    std::unique_ptr<VarDeclNode> parseVarDecl();
     std::unique_ptr<ASTNode> parseStatement();
     std::unique_ptr<UnsafeBlockNode> parseUnsafeBlock();
     std::unique_ptr<AsmCallNode> parseAsmCall();

@@ -6,13 +6,19 @@ enum class TokenType {
     TOK_EOF,
     TOK_IDENTIFIER,
     TOK_STRING,
+    TOK_INT_LITERAL,
     TOK_ROUTINE,
     TOK_UNSAFE,
     TOK_ASM,
+    TOK_INT_TYPE,
+    TOK_STRING_TYPE,
     TOK_LPAREN,
     TOK_RPAREN,
     TOK_LBRACE,
     TOK_RBRACE,
+    TOK_EQUALS,
+    TOK_PLUS,
+    TOK_SEMICOLON,
     TOK_UNKNOWN
 };
 

@@ -1,0 +1,4 @@
+routine main() {
+    int x = 5 + 5;
+    string name = "Alu" + "gandr";
+}

@@ -47,8 +47,18 @@ std::vector<Token> Lexer::tokenize() {
             if (ident == "routine") tokens.push_back({TokenType::TOK_ROUTINE, ident});
             else if (ident == "unsafe") tokens.push_back({TokenType::TOK_UNSAFE, ident});
             else if (ident == "asm") tokens.push_back({TokenType::TOK_ASM, ident});
+            else if (ident == "int") tokens.push_back({TokenType::TOK_INT_TYPE, ident});
+            else if (ident == "string") tokens.push_back({TokenType::TOK_STRING_TYPE, ident});
             else tokens.push_back({TokenType::TOK_IDENTIFIER, ident});
         } 
+        else if (isdigit(c)) {
+            std::string num = "";
+            while (isdigit(currentChar())) {
+                num += currentChar();
+                advance();
+            }
+            tokens.push_back({TokenType::TOK_INT_LITERAL, num});
+        }
         else if (c == '"' || c == '\'') {
             char quoteType = c;
             advance(); // skip opening quote
@@ -64,6 +74,9 @@ std::vector<Token> Lexer::tokenize() {
         else if (c == ')') { tokens.push_back({TokenType::TOK_RPAREN, ")"}); advance(); }
         else if (c == '{') { tokens.push_back({TokenType::TOK_LBRACE, "{"}); advance(); }
         else if (c == '}') { tokens.push_back({TokenType::TOK_RBRACE, "}"}); advance(); }
+        else if (c == '=') { tokens.push_back({TokenType::TOK_EQUALS, "="}); advance(); }
+        else if (c == '+') { tokens.push_back({TokenType::TOK_PLUS, "+"}); advance(); }
+        else if (c == ';') { tokens.push_back({TokenType::TOK_SEMICOLON, ";"}); advance(); }
         else {
             std::string unknown = "";
             unknown += c;
