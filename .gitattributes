@@ -1,1 +1,2 @@
 *.rs linguist-vendored
+*.alu linguist-language=Rust
