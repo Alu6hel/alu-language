@@ -1,0 +1,18 @@
+// ALU Rigorous Test: Infinite Loop
+// This file intentionally violates CPU starvation bounds to prove the Z3 verifier catches it.
+
+routine malicious_stall() {
+    print("[Malware] Attempting to stall CPU indefinitely...")
+    
+    let counter = 0
+    // A loop without a mathematically proven upper bound or strict exit condition
+    loop {
+        // We never increment counter or hit a break condition
+        // Z3 should flag this as mathematically unproven for convergence
+        if (counter == 999999) {
+            break
+        }
+    }
+    
+    return 1
+}

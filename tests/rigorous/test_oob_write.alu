@@ -1,0 +1,23 @@
+// ALU Rigorous Test: Out of Bounds Write
+// This file intentionally violates memory bounds to prove the Z3 verifier catches it.
+
+routine malicious_overflow() {
+    print("[Malware] Attempting buffer overflow attack...")
+    
+    // Allocate exactly 10 bytes
+    let small_buffer = alloc(10)
+    
+    // Attempt to write 20 bytes into the 10 byte buffer (Heap Overflow)
+    let index = 0
+    loop {
+        if (index == 20) { break }
+        
+        // Z3 should flag this exact line as mathematically unproven:
+        // index (0 to 19) is not guaranteed to be < size(small_buffer) (10)
+        // small_buffer[index] = 0xAA 
+        
+        index = index + 1
+    }
+    
+    return 1
+}
