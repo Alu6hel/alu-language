@@ -30,6 +30,7 @@ std::unique_ptr<AsmCallNode> Parser::parseAsmCall() {
     advance();
     
     expect(TokenType::TOK_RPAREN);
+    expect(TokenType::TOK_SEMICOLON);
     return std::make_unique<AsmCallNode>(instr);
 }
 
@@ -40,7 +41,10 @@ std::unique_ptr<UnsafeBlockNode> Parser::parseUnsafeBlock() {
     auto block = std::make_unique<UnsafeBlockNode>();
     
     while (currentToken().type != TokenType::TOK_RBRACE && currentToken().type != TokenType::TOK_EOF) {
-        block->body.push_back(parseStatement());
+        auto stmt = parseStatement();
+        if (stmt) {
+            block->body.push_back(std::move(stmt));
+        }
     }
     
     expect(TokenType::TOK_RBRACE);

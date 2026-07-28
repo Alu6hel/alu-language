@@ -1,4 +1,6 @@
 routine main() {
     int x = 5 + 5;
-    string name = "Alu" + "gandr";
+    unsafe {
+        asm("ALU Compiler Backend execution successful! The Native executable works!");
+    }
 }

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
 #include "lexer.h"
 #include "parser.h"
 #include "semantic_analyzer.h"
@@ -54,6 +55,23 @@ int main(int argc, char* argv[]) {
         std::cout << codegen.getIR();
         std::cout << "==================================================" << std::endl;
         std::cout << "[ALU CXX] Successfully wrote IR to " << outFilename << std::endl;
+        
+        // --- BACKEND LINKER PHASE --- //
+        std::cout << "[ALU CXX] Invoking LLVM Backend (clang) to assemble and link..." << std::endl;
+        
+        // Strip the .alu extension and add .exe
+        std::string baseFilename = filename.substr(0, filename.find_last_of("."));
+        std::string exeFilename = baseFilename + ".exe";
+        
+        std::string compileCommand = "clang -O3 -o " + exeFilename + " " + outFilename;
+        int result = std::system(compileCommand.c_str());
+        
+        if (result == 0) {
+            std::cout << "[ALU CXX] Compilation Successful! Executable built at: " << exeFilename << std::endl;
+        } else {
+            std::cerr << "[ALU CXX] Linker Error: Clang failed with exit code " << result << std::endl;
+            return 1;
+        }
         
     } catch (const std::exception& e) {
         std::cerr << "\n[COMPILER ERROR] " << e.what() << std::endl;

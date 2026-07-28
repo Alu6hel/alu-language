@@ -36,11 +36,32 @@ void ProgramNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 // --- LLVMCodeGen Visitor Implementation --- //
 
 void LLVMCodeGen::visit(AsmCallNode* node) {
-    // In LLVM IR, inline asm looks something like:
-    // call void asm sideeffect "instruction", "~{dirflag},~{fpsr},~{flags}"()
-    // For our prototype, we will just emit it as a comment in the IR 
-    // or a mocked standard C library printf call if it's printing something.
-    emit("  ; ALU Inline ASM: " + node->instruction);
+    // Map our custom asm("Hello World") directly to a C-standard puts() call in LLVM IR
+    std::string text = node->instruction;
+    // Strip quotes for LLVM IR string format
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+        text = text.substr(1, text.size() - 2);
+    }
+    
+    // Allocate global string constant (simplified for prototype, technically should be declared globally)
+    // We'll just use a hack: allocate it on stack and pass to puts.
+    // Actually, in LLVM IR, passing a raw c"..." to a function call works if casted properly, 
+    // but the easiest is just a global string. Since we are doing text emission, we can emit the call directly:
+    // call i32 @puts(i8* getelementptr inbounds ([12 x i8], [12 x i8]* @.str, i64 0, i64 0))
+    // We will simplify and just assume it's stored in a variable or emit a basic global.
+    
+    // The easiest way for text emission prototyping: declare the global string inline as a constant 
+    std::string str_name = "@.str." + std::to_string(tmp_counter++);
+    std::string str_val = "c\"" + text + "\\00\"";
+    int len = text.length() + 1;
+    
+    // Hack for text IR: we can't emit globals inside a function, so we'll just emit an alloca, store, and call.
+    std::string reg = getTempReg();
+    emit("  " + reg + " = alloca [" + std::to_string(len) + " x i8], align 1");
+    emit("  store [" + std::to_string(len) + " x i8] " + str_val + ", [" + std::to_string(len) + " x i8]* " + reg + ", align 1");
+    std::string ptr_reg = getTempReg();
+    emit("  " + ptr_reg + " = bitcast [" + std::to_string(len) + " x i8]* " + reg + " to i8*");
+    emit("  call i32 @puts(i8* " + ptr_reg + ")");
 }
 
 void LLVMCodeGen::visit(UnsafeBlockNode* node) {
@@ -130,6 +151,9 @@ void LLVMCodeGen::visit(ProgramNode* node) {
     emit("source_filename = \"alu_source.alu\"");
     emit("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"");
     emit("target triple = \"x86_64-pc-windows-msvc\"\n");
+    
+    // Declare the C-standard puts function so we can link against msvcrt
+    emit("declare i32 @puts(i8*)\n");
     
     for (const auto& decl : node->declarations) {
         decl->codegen(*this);
