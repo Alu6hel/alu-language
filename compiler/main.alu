@@ -29,9 +29,22 @@ routine main(args: ptr<ptr<u8>>) -> i32 {
         return 1
     }
     
-    // 4. Emit
-    let llvm_ir = emit_llvm_ir(ast_root)
-    print("[ALU Emitter] LLVM IR generation complete.")
+    // 4. Check Target Architecture
+    let target_os = "windows"
+    let target_arch = "x86_64"
+    let output_type = "exe"
+    
+    // (Simulate argument parsing)
+    // if (args_contains("--target aarch64-linux-android")) {
+        target_os = "android"
+        target_arch = "aarch64"
+        output_type = "so"
+        print("[ALU Target] Cross-compiling for Android (ARM64). Outputting Shared Object (.so)...")
+    // }
+    
+    // 5. Emit
+    let llvm_ir = emit_llvm_ir(ast_root, target_arch, target_os)
+    print("[ALU Emitter] LLVM IR generation complete for ", target_arch, "-", target_os)
     
     return 0
 }
