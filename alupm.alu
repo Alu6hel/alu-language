@@ -2,45 +2,50 @@
 // Copyright (c) 2026 [David A. Jones / Alugandr Co.]. All rights reserved.
 
 import std::fs
+import std::crypto::sha256
 import kybalion::p2p_dht // Connect to the Decentralized Swarm
 
-routine publish_package(package_name: ptr<u8>, source_dir: ptr<u8>) {
-    print("[ALUPM] Analyzing package: ", package_name)
+// Serializes and uploads a local ALU package to the Kybalion DHT
+routine publish_package(package_path: ptr<u8>) {
+    print("[ALUPM] Serializing package at path: ", package_path);
+    let pkg_data = fs::read_all_bytes(package_path);
     
-    // 1. Read all .alu files in the directory
-    // let source_code = file_read_all_recursive(source_dir)
+    // Hash the package to generate its global ID
+    let pkg_hash = sha256::hash(pkg_data);
+    print("[ALUPM] Package SHA-256 Hash: ", pkg_hash);
     
-    // 2. Hash the source code for integrity
-    // let package_hash = std::crypto::sha3_hash(source_code)
+    // Broadcast to the decentralized swarm
+    print("[ALUPM] Broadcasting to Kybalion P2P DHT...");
+    let swarm_status = p2p_dht::distribute(pkg_hash, pkg_data);
     
-    print("[ALUPM] Broadcasting package to the Kybalion DHT P2P Network...")
-    
-    // 3. Inject the code into the global swarm
-    // kybalion::p2p_dht::dht_store_value(package_hash, source_code)
-    
-    print("[ALUPM] SUCCESS! ", package_name, " is now permanently seeded on the Decentralized Swarm. It cannot be censored or taken offline.")
+    if (swarm_status == OK) {
+        print("[SUCCESS] Package successfully seeded to the global swarm.");
+        print("          It is now censorship-resistant and permanently hosted.");
+    } else {
+        print("[ERROR] Failed to connect to swarm peers.");
+    }
 }
 
-routine install_package(package_name: ptr<u8>) {
-    print("[ALUPM] Querying Kybalion DHT for package: ", package_name, "...")
+// Queries the DHT and reconstructs the package locally
+routine install_package(package_hash: ptr<u8>) {
+    print("[ALUPM] Searching Kybalion DHT for package: ", package_hash);
     
-    // 1. Resolve package name to DHT Hash
-    // let package_hash = kybalion::dht_resolve_name(package_name)
+    // Connect to peers to download chunks
+    let pkg_data = p2p_dht::retrieve(package_hash);
     
-    // 2. Fetch from nearest peers
-    // let source_code = kybalion::p2p_dht::dht_fetch_value(package_hash)
-    
-    print("[ALUPM] Download complete. Verifying cryptographic signatures...")
-    
-    // 3. Write to local module directory
-    // file_write_all("./alu_modules/" + package_name, source_code)
-    
-    print("[ALUPM] SUCCESS! ", package_name, " is installed and ready to use.")
-}
-
-routine main(args: ptr<ptr<u8>>) {
-    // Simulated CLI parsing
-    // if (args[1] == "publish") publish_package(args[2], args[3])
-    // else if (args[1] == "install") install_package(args[2])
-    print("[ALUPM] AluPM V1.0 Online. The Decentralized Open-Source Ecosystem.")
+    if (pkg_data != null) {
+        print("[ALUPM] Package chunks successfully retrieved from peers.");
+        print("[ALUPM] Verifying SHA-256 integrity...");
+        
+        let verify_hash = sha256::hash(pkg_data);
+        if (verify_hash == package_hash) {
+            print("[SUCCESS] Integrity confirmed. Installing to std/lib...");
+            fs::write_bytes("std/lib/" + package_hash, pkg_data);
+            print("[SUCCESS] Installation complete.");
+        } else {
+            print("[ERROR] Package corrupted during P2P transit.");
+        }
+    } else {
+        print("[ERROR] Package not found in the global swarm.");
+    }
 }
