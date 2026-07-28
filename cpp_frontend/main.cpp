@@ -4,6 +4,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "semantic_analyzer.h"
+#include "llvm_codegen.h"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -42,6 +43,18 @@ int main(int argc, char* argv[]) {
         semanticAnalyzer.analyze(ast.get());
         
         std::cout << "[ALU CXX] Ready for LLVM IR Translation." << std::endl;
+        
+        LLVMCodeGen codegen;
+        ast->codegen(codegen);
+        
+        std::string outFilename = filename + ".ll";
+        codegen.saveToFile(outFilename);
+        
+        std::cout << "==================================================" << std::endl;
+        std::cout << codegen.getIR();
+        std::cout << "==================================================" << std::endl;
+        std::cout << "[ALU CXX] Successfully wrote IR to " << outFilename << std::endl;
+        
     } catch (const std::exception& e) {
         std::cerr << "\n[COMPILER ERROR] " << e.what() << std::endl;
         return 1;

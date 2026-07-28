@@ -20,11 +20,14 @@ inline std::string DataTypeToString(DataType type) {
     }
 }
 
+class LLVMCodeGen;
+
 // Base AST Node
 class ASTNode {
 public:
     virtual ~ASTNode() = default;
     virtual void print(int indent = 0) const = 0;
+    virtual void codegen(LLVMCodeGen& cg) = 0;
 };
 
 // Inline Assembly Call: asm("...");
@@ -35,6 +38,7 @@ public:
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[AsmCall] -> " << instruction << std::endl;
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
 
 // Unsafe Block: unsafe { ... }
@@ -47,6 +51,7 @@ public:
             stmt->print(indent + 4);
         }
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
 
 // Literal Node (e.g., 5 or "hello")
@@ -58,6 +63,7 @@ public:
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[Literal] " << value << std::endl;
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
 
 // Binary Operation Node (e.g., +)
@@ -73,6 +79,7 @@ public:
         left->print(indent + 4);
         right->print(indent + 4);
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
 
 // Variable Declaration Node: int x = 5;
@@ -87,6 +94,7 @@ public:
         std::cout << std::string(indent, ' ') << "[VarDecl] " << varType << " " << name << std::endl;
         if (initializer) initializer->print(indent + 4);
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
 
 // Routine Node: routine name() { ... }
@@ -101,6 +109,7 @@ public:
             stmt->print(indent + 4);
         }
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
 
 // Program Root Node
@@ -113,4 +122,5 @@ public:
             decl->print(indent + 4);
         }
     }
+    void codegen(LLVMCodeGen& cg) override;
 };
