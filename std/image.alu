@@ -1,0 +1,64 @@
+// ALU Native Standard Library: Image Processing
+// Provides core structs and FFI bindings to C libraries for image processing.
+
+import "std/mem.alu";
+import "std/math.alu";
+import "std/io.alu";
+
+struct Image {
+    int width;
+    int height;
+    int channels;
+    string data; // byte pointer to raw image data
+}
+
+struct Color {
+    float r;
+    float g;
+    float b;
+    float a;
+}
+
+// Extern bindings to a C Backend image handling (stb_image wrapper)
+extern routine image_load(string filename, string w_ptr, string h_ptr, string c_ptr, int req_comp) -> string;
+extern routine image_save_png(string filename, int w, int h, int comp, string data, int stride) -> int;
+extern routine image_save_jpg(string filename, int w, int h, int comp, string data, int quality) -> int;
+extern routine image_free(string data) -> void;
+extern routine image_grayscale(string data, int w, int h, int c) -> void;
+
+routine process_grayscale(Image img) -> void {
+    int size = img.width * img.height * img.channels;
+    int i = 0;
+    string d = img.data;
+    
+    int r = 0;
+    int g = 0;
+    int b = 0;
+    int gray_r = 0;
+    int gray_g = 0;
+    int gray_b = 0;
+    int gray_sum = 0;
+    int gray = 0;
+    
+    while (i < size) {
+        r = d[i];
+        g = d[i+1];
+        b = d[i+2];
+        
+        // Use integer approximation for luminance to stay fast
+        gray_r = r * 30;
+        gray_g = g * 59;
+        gray_b = b * 11;
+        gray_sum = gray_r + gray_g;
+        gray_sum = gray_sum + gray_b;
+        gray = gray_sum / 100;
+        
+        d[i] = gray;
+        d[i+1] = gray;
+        d[i+2] = gray;
+        
+        i = i + img.channels;
+    }
+    
+    puts("Applied native ALU grayscale transformation utilizing byte pointer indexing!");
+}

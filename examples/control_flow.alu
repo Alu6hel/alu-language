@@ -1,0 +1,33 @@
+routine calculate_secret(int start, int limit) -> int {
+    int counter = start;
+    int accumulator = 0;
+    
+    while (counter < limit) {
+        accumulator = accumulator + 5;
+        counter = counter + 1;
+    }
+    
+    return accumulator;
+}
+
+routine main() {
+    int x = 10;
+    
+    if (x == 10) {
+        unsafe {
+            asm("Condition met! Entering True Block...");
+        }
+    } else {
+        unsafe {
+            asm("Condition failed! This is the False block.");
+        }
+    }
+    
+    int result = calculate_secret(0, 3);
+    
+    if (result > 10) {
+        unsafe {
+            asm("Function returned successfully! Loops and Branching work.");
+        }
+    }
+}

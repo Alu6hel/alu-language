@@ -1,0 +1,34 @@
+extern routine printf(string fmt, ...) -> void;
+extern routine malloc(int size) -> int*;
+
+struct Point {
+    int x;
+    int y;
+}
+
+routine main() -> int {
+    // 1. Arrays
+    int numbers[5];
+    numbers[0] = 10;
+    numbers[1] = 20;
+    
+    int val = numbers[0] + numbers[1];
+    printf("Array test: %d + %d = %d\n", numbers[0], numbers[1], val);
+    
+    // 2. Pointers & Address Of
+    int a = 100;
+    int* p = &a;
+    *p = 200; // Modifies 'a'
+    printf("Pointer test (Address Of): a = %d\n", a);
+    
+    // 3. Dynamic Memory (Heap Allocation)
+    int* heap_val = new int;
+    *heap_val = 500;
+    printf("Pointer test (Heap Allocation): heap_val = %d\n", *heap_val);
+    
+    // Free the heap memory
+    free heap_val;
+    printf("Pointer test (Heap Allocation): memory freed!\n");
+    
+    return 0;
+}

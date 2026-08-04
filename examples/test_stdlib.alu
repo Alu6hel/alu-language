@@ -1,0 +1,26 @@
+extern routine printf(string fmt, ...) -> int;
+extern routine malloc(int size) -> int;
+extern routine free(int ptr) -> void;
+extern routine rand() -> int;
+extern routine srand(int seed) -> void;
+
+routine main() {
+    printf("--- ALU Standard Library Test ---\n");
+    
+    printf("Testing Random Number Generator:\n");
+    srand(12345);
+    int random_val = rand();
+    printf("Random Value: %d\n", random_val);
+    
+    printf("Testing Memory Allocation (malloc):\n");
+    int ptr = malloc(1024);
+    if (ptr > 0) {
+        printf("Successfully allocated 1024 bytes at address: %d\n", ptr);
+        free(ptr);
+        printf("Freed memory at address: %d\n", ptr);
+    } else {
+        printf("Failed to allocate memory!\n");
+    }
+    
+    printf("--- Test Complete ---\n");
+}

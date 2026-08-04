@@ -1,0 +1,18 @@
+extern routine puts(string s) -> void;
+extern routine printf(string fmt, ...) -> void;
+
+struct Point {
+    int x;
+    int y;
+}
+
+routine main() -> int {
+    Point p;
+    p.x = 10;
+    p.y = 20;
+
+    int sum = p.x + p.y;
+    printf("The sum of p.x and p.y is %d\n", sum);
+
+    return 0;
+}

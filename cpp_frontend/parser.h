@@ -11,11 +11,18 @@ private:
     void expect(TokenType type);
     
     std::unique_ptr<ASTNode> parseExpression();
-    std::unique_ptr<VarDeclNode> parseVarDecl();
+    std::unique_ptr<ASTNode> parseVarDecl();
+    std::unique_ptr<ASTNode> parseExternRoutine();
     std::unique_ptr<ASTNode> parseStatement();
-    std::unique_ptr<UnsafeBlockNode> parseUnsafeBlock();
     std::unique_ptr<AsmCallNode> parseAsmCall();
+    std::unique_ptr<UnsafeBlockNode> parseUnsafeBlock();
+    std::unique_ptr<IfNode> parseIfStatement();
+    std::unique_ptr<WhileNode> parseWhileStatement();
+    std::unique_ptr<ReturnNode> parseReturnStatement();
+    std::unique_ptr<FuncCallNode> parseFuncCall(std::string name);
+    std::vector<std::unique_ptr<ASTNode>> parseBlock();
     std::unique_ptr<RoutineNode> parseRoutine();
+    std::unique_ptr<StructDefNode> parseStructDef();
 public:
     Parser(std::vector<Token> toks);
     std::unique_ptr<ProgramNode> parse();
