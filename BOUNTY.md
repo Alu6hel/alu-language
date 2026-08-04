@@ -23,6 +23,7 @@ If you successfully breach the Z3 mathematical verifier and trigger a memory exp
 3. Open a vulnerability report in our [Security Advisory tab](https://github.com/Alu6hel/alu-language/security/advisories).
 
 ### The Reward
+*Legal Notice: The $10,000 Bug Bounty will officially open once Alu Security LLC closes its Seed funding round. Until then, valid submissions will receive Hall of Fame status and priority for back-pay.*
 If the vulnerability is confirmed valid under the rules above, we will:
 1. Pay out the **$10,000 USD** bounty via Wire Transfer or Crypto.
 2. Add your name and a link to your profile to our permanent **Hall of Fame**.
