@@ -1,0 +1,29 @@
+import "std/swarm.alu";
+import "std/io.alu";
+import "std/net.alu";
+
+routine main() -> int {
+    print("--- Testing Secure Swarm P2P Protocol ---");
+    
+    // Start node listener on port 8000
+    int udp_sock = swarm_join(8000);
+    
+    // Broadcast a mock YARA signature to port 8000
+    print("Broadcasting threat signature to Swarm...");
+    swarm_broadcast("YARA_RULE: [EICAR-TEST]", 8000);
+    
+    // Poll the listener to see if we received the broadcast
+    print("Polling node listener for updates...");
+    
+    // Simple sleep to give UDP time to route locally
+    int i = 0;
+    while (i < 10000000) {
+        i = i + 1;
+    }
+    
+    swarm_poll(udp_sock);
+    
+    net_close(udp_sock);
+    print("Test Complete.");
+    return 0;
+}

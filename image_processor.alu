@@ -1,0 +1,304 @@
+import "std/io.alu";
+import "std/math.alu";
+import "std/string.alu";
+import "std/image.alu";
+import "std/mem.alu";
+import "std/bmp.alu";
+import "std/png.alu";
+import "std/jpg.alu";
+import "std/resizer.alu";
+import "std/png_enc.alu";
+import "std/filters.alu";
+
+routine ends_with(string str, string suffix) -> int {
+    int str_len = strlen(str);
+    int suf_len = strlen(suffix);
+    if (str_len < suf_len) { return 0; }
+    
+    for (int i = 0; i < suf_len; i = i + 1) {
+        if (str[(str_len - suf_len) + i] != suffix[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+export routine process_image(string in_file, int width, int height, string out_file, int quality, int fit, int bicubic) -> int {
+    puts("=== ALU Native Image Processor ===");
+    
+    string actual_in_file = in_file;
+    if (ends_with(in_file, ".webp") == 1) {
+        printf("Converting WebP to PNG natively via system command...\n");
+        string cmd = malloc(1024);
+        sprintf(cmd, "dwebp %s -o %s.png", in_file, in_file);
+        system(cmd);
+        free(cmd);
+        actual_in_file = malloc(1024);
+        sprintf(actual_in_file, "%s.png", in_file);
+    }
+    
+    string actual_out_file = out_file;
+    if (ends_with(out_file, ".webp") == 1) {
+        actual_out_file = malloc(1024);
+        sprintf(actual_out_file, "%s.png", out_file);
+    }
+    
+    Image img;
+    img.width = 0;
+    
+    if (ends_with(actual_in_file, ".png") == 1) {
+        printf("Loading %s using 100%% Native ALU PNG Decoder...\n", actual_in_file);
+        img = png_read(actual_in_file);
+    } else {
+        if (ends_with(actual_in_file, ".bmp") == 1) {
+            printf("Loading %s using 100%% Native ALU BMP Decoder...\n", actual_in_file);
+            img = bmp_load(actual_in_file);
+        } else {
+            if (ends_with(actual_in_file, ".jpg") == 1) {
+                printf("Loading %s using Native JPG Decoder...\n", actual_in_file);
+                img = jpg_read(actual_in_file);
+            } else {
+                printf("Unsupported input format: %s\n", actual_in_file);
+                return 1;
+            }
+        }
+    }
+    
+    if (img.width == 0) {
+        printf("Failed to load %s\n", actual_in_file);
+        return 1;
+    }
+    
+    int new_w = width;
+    int new_h = height;
+    
+    if (fit == 1) {
+        new_h = (img.height * width) / img.width;
+        if (new_h > height) {
+            new_h = height;
+            new_w = (img.width * height) / img.height;
+        }
+    }
+    
+    printf("Target Size: %dx%d (Fit: %d)\n", new_w, new_h, fit);
+    
+    if ((img.width != new_w) | (img.height != new_h)) {
+        if (bicubic == 1) {
+            puts("Resizing image natively in ALU using Bicubic Interpolation...");
+            Image resized_img = resize_bicubic(img, new_w, new_h);
+            puts("\nResize complete.");
+            free(img.data);
+            img = resized_img;
+        } else {
+            puts("Resizing image natively in ALU using Bilinear Interpolation...");
+            Image resized_img = resize_bilinear(img, new_w, new_h);
+            puts("\nResize complete.");
+            free(img.data);
+            img = resized_img;
+        }
+    }
+    
+    if (ends_with(actual_out_file, ".png") == 1) {
+        printf("Encoding %s using Native PNG Encoder (Quality %d)...\n", actual_out_file, quality);
+        png_write(actual_out_file, img, quality);
+        puts("\nEncode complete.");
+    } else {
+        if (ends_with(actual_out_file, ".bmp") == 1) {
+            printf("Encoding %s using Native BMP Encoder...\n", actual_out_file);
+            int ok = bmp_save(actual_out_file, img);
+        } else {
+            if (ends_with(actual_out_file, ".jpg") == 1) {
+                printf("Encoding %s using Native JPG Encoder (Quality %d)...\n", actual_out_file, quality);
+                jpg_write(actual_out_file, img, quality);
+            } else {
+                printf("Unsupported output format: %s\n", actual_out_file);
+                return 1;
+            }
+        }
+    }
+    
+    free(img.data);
+    
+    if (ends_with(out_file, ".webp") == 1) {
+        printf("Converting PNG to WebP natively via system command...\n");
+        string cmd = malloc(1024);
+        sprintf(cmd, "cwebp -q %d %s -o %s", quality, actual_out_file, out_file);
+        system(cmd);
+        free(cmd);
+    }
+    
+    printf("Processing complete! Saved to %s.\n", out_file);
+    return 0;
+}
+
+export routine process_hybrid(string low_file, string high_file, string out_file, int radius) -> int {
+    puts("=== ALU Native Hybrid Image Processor ===");
+    
+    Image low_img = jpg_read(low_file);
+    if (low_img.width == 0) {
+        printf("Failed to load low frequency image %s\n", low_file);
+        return 1;
+    }
+    
+    Image high_img = jpg_read(high_file);
+    if (high_img.width == 0) {
+        printf("Failed to load high frequency image %s\n", high_file);
+        return 1;
+    }
+    
+    // Ensure dimensions match. For simplicity, resize high_img to low_img size
+    if ((low_img.width != high_img.width) | (low_img.height != high_img.height)) {
+        printf("Resizing high frequency image to match low frequency dimensions...\n");
+        Image resized_high = resize_bilinear(high_img, low_img.width, low_img.height);
+        free(high_img.data);
+        high_img = resized_high;
+    }
+    
+    Image hybrid_img = blend_hybrid(low_img, high_img, radius);
+    
+    printf("Encoding hybrid image...\n");
+    jpg_write(out_file, hybrid_img, 90);
+    
+    free(low_img.data);
+    free(high_img.data);
+    free(hybrid_img.data);
+    
+    printf("Hybrid processing complete! Saved to %s.\n", out_file);
+    return 0;
+}
+
+export routine apply_filter(string in_rgba, string out_rgba, int w, int h) -> int {
+    Image src;
+    src.width = w;
+    src.height = h;
+    src.channels = 4;
+    src.data = in_rgba;
+    
+    Image dst;
+    dst.width = w;
+    dst.height = h;
+    dst.channels = 4;
+    dst.data = out_rgba;
+    
+    box_blur_h(src, dst, 10);
+    box_blur_v(dst, src, 10);
+    
+    // Copy back if needed (box_blur_v wrote to src)
+    // Actually we can just do a simple color inversion for demo if box blur is too slow.
+    // But let's do a fast edge detect or color invert for realtime demonstration.
+    
+    string s = src.data;
+    string d = dst.data;
+    int size = w * h * 4;
+    for (int i = 0; i < size; i = i + 4) {
+        int r = int(s[i]) & 255;
+        int g = int(s[i+1]) & 255;
+        int b = int(s[i+2]) & 255;
+        
+        // Sepia or grayscale for realtime demo
+        int gray = (r*30 + g*59 + b*11) / 100;
+        
+        d[i] = gray & 255;
+        d[i+1] = gray & 255;
+        d[i+2] = gray & 255;
+        d[i+3] = 255;
+    }
+    
+    return 0;
+}
+
+routine main(int argc, string[] argv) -> int {
+    if (argc < 5) {
+        puts("Usage: alu_resizer [--batch] [--fit] [--bicubic] [-q <quality>] <in> <width> <height> <out>");
+        return 1;
+    }
+    
+    int quality = 5;
+    int fit = 0;
+    int bicubic = 0;
+    int batch = 0;
+    
+    int arg_idx = 1;
+    
+    int parsing_opts = 1;
+    while ((arg_idx < argc) & (parsing_opts == 1)) {
+        if (strcmp(argv[arg_idx], "-q") == 0) {
+            quality = atoi(argv[arg_idx + 1]);
+            arg_idx = arg_idx + 2;
+        } else {
+            if (strcmp(argv[arg_idx], "--fit") == 0) {
+                fit = 1;
+                arg_idx = arg_idx + 1;
+            } else {
+                if (strcmp(argv[arg_idx], "--bicubic") == 0) {
+                    bicubic = 1;
+                    arg_idx = arg_idx + 1;
+                } else {
+                    if (strcmp(argv[arg_idx], "--batch") == 0) {
+                        batch = 1;
+                        arg_idx = arg_idx + 1;
+                    } else {
+                        parsing_opts = 0; // Stop parsing options
+                    }
+                }
+            }
+        }
+    }
+    
+    if ((argc - arg_idx) < 4) {
+        puts("Missing required positional arguments.");
+        return 1;
+    }
+    
+    string in_file = argv[arg_idx];
+    int width = atoi(argv[arg_idx + 1]);
+    int height = atoi(argv[arg_idx + 2]);
+    string out_file = argv[arg_idx + 3];
+    
+    if (batch == 1) {
+        string cmd = malloc(1024);
+        sprintf(cmd, "dir /b %s > .alu_glob_tmp", in_file);
+        system(cmd);
+        free(cmd);
+        
+        string f = fopen(".alu_glob_tmp", "rb");
+        if (int(f) == 0) {
+            puts("Failed to read batch matches.");
+            return 1;
+        }
+        string buffer = malloc(1024 * 1024);
+        int bytes = fread(buffer, 1, 1024 * 1024, f);
+        fclose(f);
+        
+        int start = 0;
+        for (int i = 0; i <= bytes; i = i + 1) {
+            int ch = 0;
+            if (i < bytes) { ch = (int(buffer[i]) & 255); }
+            
+            if ((ch == 10) | (ch == 13) | (ch == 0)) {
+                if (i > start) {
+                    int len = (i - start);
+                    string matched_file = malloc(len + 1);
+                    for (int j = 0; j < len; j = j + 1) {
+                        matched_file[j] = buffer[(start + j)];
+                    }
+                    matched_file[len] = 0;
+                    
+                    string out_path = malloc(1024);
+                    sprintf(out_path, "%s/%s", out_file, matched_file);
+                    printf("\n--- Batch Processing: %s ---\n", matched_file);
+                    process_image(matched_file, width, height, out_path, quality, fit, bicubic);
+                    free(out_path);
+                    free(matched_file);
+                }
+                start = i + 1;
+            }
+        }
+        free(buffer);
+        
+    } else {
+        process_image(in_file, width, height, out_file, quality, fit, bicubic);
+    }
+
+    return 0;
+}

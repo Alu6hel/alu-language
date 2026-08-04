@@ -1,0 +1,24 @@
+import "std/yara.alu";
+import "std/io.alu";
+
+routine main() -> int {
+    printf("Testing Native YARA Engine...\n");
+
+    int rule = yara_create_rule();
+    
+    // Test EICAR standard antivirus test string
+    string eicar = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+    yara_add_string_pattern(rule, eicar);
+    
+    // Let's create a test file in memory or use buffer directly
+    int is_match = yara_scan_buffer(rule, eicar, 68); // 68 bytes
+    
+    if (is_match != 0) {
+        printf("SUCCESS: YARA engine correctly identified the EICAR string in the buffer!\n");
+    } else {
+        printf("FAIL: YARA engine missed the EICAR string.\n");
+        return 1;
+    }
+    
+    return 0;
+}

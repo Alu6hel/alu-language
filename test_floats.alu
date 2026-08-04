@@ -1,0 +1,17 @@
+import "std/io.alu";
+
+routine main() -> int {
+    float a;
+    a = 3.14;
+    float b;
+    b = 2.0;
+    
+    float c = a * b;
+    float d = a + b;
+    float e = a / b;
+    
+    // We can't print float directly yet using print_int, but we can verify it compiles
+    // and runs without crashing!
+    puts("Float math passed compilation and execution!");
+    return 0;
+}

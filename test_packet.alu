@@ -1,0 +1,29 @@
+import "std/packet.alu";
+import "std/io.alu";
+
+routine main() -> int {
+    print("--- Testing C++ Packet Inspection Backend ---");
+    
+    // Mock an IPv4 / TCP packet byte array (40 bytes total: 20 IP + 20 TCP)
+    // 0x45 (Version 4, IHL 5) -> IP Header is 20 bytes
+    // Protocol is 6 (TCP) at offset 9
+    // TCP Data offset is at offset 32 (12 bytes into TCP header). Let's set it to 0x50 (5 * 4 = 20 bytes)
+    
+    // Total length = 55. Payload should be 15 bytes: "MALWARE_PAYLOAD"
+    string mock_packet = "\x45\x00\x00\x37\x00\x00\x00\x00\x40\x06\x00\x00\x7F\x00\x00\x01\x7F\x00\x00\x01\x00\x50\x00\x50\x00\x00\x00\x00\x00\x00\x00\x00\x50\x00\x00\x00\x00\x00\x00\x00MALWARE_PAYLOAD";
+    
+    // Buffer for extracted payload
+    string payload_out = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+    
+    int extracted_len = packet_extract_payload(mock_packet, 55, payload_out);
+    
+    if (extracted_len > 0) {
+        print("Packet Payload Successfully Extracted!");
+        print("Payload:");
+        print(payload_out);
+    } else {
+        print("Failed to extract payload.");
+    }
+    
+    return 0;
+}

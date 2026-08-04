@@ -1,0 +1,6 @@
+import "std/io.alu";
+
+routine main() -> int {
+    print("Hello from Alu Package Manager!");
+    return 0;
+}

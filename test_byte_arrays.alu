@@ -1,0 +1,30 @@
+extern routine printf(string fmt, int val) -> void;
+extern routine malloc(int size) -> string;
+extern routine free(string ptr) -> void;
+
+routine main() -> int {
+    // Allocate 10 bytes (string acts as pointer to i8)
+    string data = malloc(10);
+    
+    // Test writing byte to string (pointer indexing)
+    data[0] = 255;
+    data[1] = 128;
+    data[2] = 0;
+    
+    // Test reading byte from string (implicit cast from byte to int for printf)
+    int val1 = data[0];
+    int val2 = data[1];
+    int val3 = data[2];
+    
+    printf("data[0] = %d\n", val1);
+    printf("data[1] = %d\n", val2);
+    printf("data[2] = %d\n", val3);
+    
+    // Test explicit byte primitive type (if we want to use it statically)
+    byte b = 42;
+    int b_int = b;
+    printf("byte b = %d\n", b_int);
+    
+    free(data);
+    return 0;
+}

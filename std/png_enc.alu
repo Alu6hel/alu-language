@@ -1,0 +1,311 @@
+import "std/mem.alu";
+import "std/math.alu";
+import "std/io.alu";
+import "std/png.alu"; // For crc32 and paeth_predict
+import "std/zlib_encode.alu";
+
+struct BitWriter {
+    string buf;
+    int byte_pos;
+    int bit_buf;
+    int bit_count;
+}
+
+routine bw_init(BitWriter* bw, string buf) {
+    bw.buf = buf;
+    bw.byte_pos = 0;
+    bw.bit_buf = 0;
+    bw.bit_count = 0;
+}
+
+routine bw_write_bits(BitWriter* bw, int val, int count) {
+    string b = bw.buf;
+    int v = (val & ((1 << count) - 1));
+    bw.bit_buf = (bw.bit_buf | (v << bw.bit_count));
+    bw.bit_count = (bw.bit_count + count);
+    while (bw.bit_count >= 8) {
+        b[bw.byte_pos] = (bw.bit_buf & 255);
+        bw.byte_pos = (bw.byte_pos + 1);
+        bw.bit_buf = (bw.bit_buf >> 8);
+        bw.bit_count = (bw.bit_count - 8);
+    }
+}
+
+routine bw_flush(BitWriter* bw) {
+    if (bw.bit_count > 0) {
+        string b = bw.buf;
+        b[bw.byte_pos] = (bw.bit_buf & 255);
+        bw.byte_pos = (bw.byte_pos + 1);
+        bw.bit_buf = 0;
+        bw.bit_count = 0;
+    }
+}
+
+// Zlib Adler32
+routine adler32(string data, int length) -> int {
+    int s1 = 1;
+    int s2 = 0;
+    for (int i = 0; i < length; i = (i + 1)) {
+        s1 = ((s1 + (int(data[i]) & 255)) % 65521);
+        s2 = ((s2 + s1) % 65521);
+    }
+    return ((s2 << 16) | s1);
+}
+
+routine filter_png(string data, int width, int height, int bpp, int* out_len) -> string {
+    int row_bytes = (width * bpp);
+    int out_stride = (row_bytes + 1);
+    int total_out = (height * out_stride);
+    string out_data = malloc(total_out);
+    
+    int val = 0;
+    int left = 0;
+    int up = 0;
+    int x = 0;
+    int up_left = 0;
+    int p = 0;
+    int diff = 0;
+    int filtered = 0;
+    
+    for (int y = 0; y < height; y = (y + 1)) {
+        printf("\r[PNG Filter] %d%%", ((y * 100) / height));
+        fflush(0);
+        int src_offset = (y * row_bytes);
+        int dst_offset = (y * out_stride);
+        
+        int best_filter = 0;
+        int best_sum = 2147483647;
+        
+        // Filter 0 (None)
+        int sum_none = 0;
+        for (x = 0; x < row_bytes; x = (x + 1)) {
+            val = (int(data[(src_offset + x)]) & 255);
+            sum_none = (sum_none + val);
+        }
+        best_sum = sum_none;
+        best_filter = 0;
+        
+        // Filter 1 (Sub)
+        int sum_sub = 0;
+        for (x = 0; x < row_bytes; x = (x + 1)) {
+            val = (int(data[(src_offset + x)]) & 255);
+            left = 0;
+            if (x >= bpp) { left = (int(data[((src_offset + x) - bpp)]) & 255); }
+            diff = ((val - left) & 255);
+            if (diff > 127) { diff = (256 - diff); }
+            sum_sub = (sum_sub + diff);
+        }
+        if (sum_sub < best_sum) { best_sum = sum_sub; best_filter = 1; }
+        
+        // Filter 2 (Up)
+        if (y > 0) {
+            int sum_up = 0;
+            for (x = 0; x < row_bytes; x = (x + 1)) {
+                val = (int(data[(src_offset + x)]) & 255);
+                up = (int(data[((src_offset - row_bytes) + x)]) & 255);
+                diff = ((val - up) & 255);
+                if (diff > 127) { diff = (256 - diff); }
+                sum_up = (sum_up + diff);
+            }
+            if (sum_up < best_sum) { best_sum = sum_up; best_filter = 2; }
+        }
+        
+        // Filter 3 (Average)
+        int sum_avg = 0;
+        for (x = 0; x < row_bytes; x = (x + 1)) {
+            val = (int(data[(src_offset + x)]) & 255);
+            left = 0;
+            if (x >= bpp) { left = (int(data[((src_offset + x) - bpp)]) & 255); }
+            up = 0;
+            if (y > 0) { up = (int(data[((src_offset - row_bytes) + x)]) & 255); }
+            int avg = ((left + up) / 2);
+            diff = ((val - avg) & 255);
+            if (diff > 127) { diff = (256 - diff); }
+            sum_avg = (sum_avg + diff);
+        }
+        if (sum_avg < best_sum) { best_sum = sum_avg; best_filter = 3; }
+        
+        // Filter 4 (Paeth)
+        int sum_paeth = 0;
+        for (x = 0; x < row_bytes; x = (x + 1)) {
+            val = (int(data[(src_offset + x)]) & 255);
+            left = 0;
+            if (x >= bpp) { left = (int(data[((src_offset + x) - bpp)]) & 255); }
+            up = 0;
+            if (y > 0) { up = (int(data[((src_offset - row_bytes) + x)]) & 255); }
+            up_left = 0;
+            if ((y > 0) & (x >= bpp)) { up_left = (int(data[(((src_offset - row_bytes) + x) - bpp)]) & 255); }
+            p = paeth_predict(left, up, up_left);
+            diff = ((val - p) & 255);
+            if (diff > 127) { diff = (256 - diff); }
+            sum_paeth = (sum_paeth + diff);
+        }
+        if (sum_paeth < best_sum) { best_sum = sum_paeth; best_filter = 4; }
+        
+        out_data[dst_offset] = (best_filter & 255);
+        
+        for (x = 0; x < row_bytes; x = (x + 1)) {
+            val = (int(data[(src_offset + x)]) & 255);
+            left = 0;
+            if (x >= bpp) { left = (int(data[((src_offset + x) - bpp)]) & 255); }
+            up = 0;
+            if (y > 0) { up = (int(data[((src_offset - row_bytes) + x)]) & 255); }
+            up_left = 0;
+            if ((y > 0) & (x >= bpp)) { up_left = (int(data[(((src_offset - row_bytes) + x) - bpp)]) & 255); }
+            
+            filtered = val;
+            if (best_filter == 1) { filtered = ((val - left) & 255); }
+            if (best_filter == 2) { filtered = ((val - up) & 255); }
+            if (best_filter == 3) { filtered = ((val - ((left + up) / 2)) & 255); }
+            if (best_filter == 4) { filtered = ((val - paeth_predict(left, up, up_left)) & 255); }
+            
+            out_data[((dst_offset + 1) + x)] = (filtered & 255);
+        }
+        
+    }
+    
+    puts("");
+    
+    *out_len = total_out;
+    return out_data;
+}
+
+routine deflate_compress_uncompressed(string data, int length, int* out_len) -> string {
+    // 2 bytes Zlib header + blocks (5 bytes header each) + data + 4 bytes adler
+    int max_blocks = ((length / 32000) + 1);
+    int max_out = (length + (max_blocks * 5) + 6);
+    string out_buf = malloc(max_out);
+    
+    BitWriter bw;
+    bw_init(&bw, out_buf);
+    
+    // Zlib Header
+    // CMF: CM=8 (Deflate), CINFO=7 (32K window) -> 0x78
+    bw_write_bits(&bw, 120, 8);
+    // FLG: FCHECK=1 (so CMF*256+FLG is multiple of 31) -> 0x78 * 256 + 1 = 30721 % 31 = 0
+    bw_write_bits(&bw, 1, 8);
+    
+    int block_len = 0;
+    for (int offset = 0; offset < length; offset = (offset + block_len)) {
+        block_len = (length - offset);
+        if (block_len > 32000) { block_len = 32000; }
+        
+        int bfinal = 0;
+        if ((offset + block_len) >= length) { bfinal = 1; }
+        
+        // BFINAL + BTYPE (00)
+        bw_write_bits(&bw, bfinal, 1);
+        bw_write_bits(&bw, 0, 2);
+        
+        bw_flush(&bw);
+        
+        // write len and nlen
+        int len = block_len;
+        int nlen = ((0 - 1) - len); // 1's complement
+        
+        string b = bw.buf;
+        b[bw.byte_pos] = (len & 255); bw.byte_pos = (bw.byte_pos + 1);
+        b[bw.byte_pos] = ((len >> 8) & 255); bw.byte_pos = (bw.byte_pos + 1);
+        b[bw.byte_pos] = (nlen & 255); bw.byte_pos = (bw.byte_pos + 1);
+        b[bw.byte_pos] = ((nlen >> 8) & 255); bw.byte_pos = (bw.byte_pos + 1);
+        
+        for (int i = 0; i < len; i = (i + 1)) {
+            b[bw.byte_pos] = data[(offset + i)];
+            bw.byte_pos = (bw.byte_pos + 1);
+        }
+        
+    }
+    
+    int adler = adler32(data, length);
+    string b2 = bw.buf;
+    b2[bw.byte_pos] = ((adler >> 24) & 255); bw.byte_pos = (bw.byte_pos + 1);
+    b2[bw.byte_pos] = ((adler >> 16) & 255); bw.byte_pos = (bw.byte_pos + 1);
+    b2[bw.byte_pos] = ((adler >> 8) & 255); bw.byte_pos = (bw.byte_pos + 1);
+    b2[bw.byte_pos] = (adler & 255); bw.byte_pos = (bw.byte_pos + 1);
+    
+    *out_len = bw.byte_pos;
+    return out_buf;
+}
+
+routine write_chunk(string fd, string type, string data, int length) {
+    string len_buf = malloc(4);
+    len_buf[0] = ((length >> 24) & 255);
+    len_buf[1] = ((length >> 16) & 255);
+    len_buf[2] = ((length >> 8) & 255);
+    len_buf[3] = (length & 255);
+    fwrite(len_buf, 1, 4, fd);
+    free(len_buf);
+    
+    fwrite(type, 1, 4, fd);
+    
+    if (length > 0) {
+        fwrite(data, 1, length, fd);
+    }
+    
+    // CRC32 calculation needs type + data
+    string crc_data = malloc((length + 4));
+    crc_data[0] = type[0]; crc_data[1] = type[1]; crc_data[2] = type[2]; crc_data[3] = type[3];
+    for (int i = 0; i < length; i = (i + 1)) {
+        crc_data[(i + 4)] = data[i];
+    }
+    
+    int crc = crc32(crc_data, 0, (length + 4));
+    free(crc_data);
+    
+    string crc_buf = malloc(4);
+    crc_buf[0] = ((crc >> 24) & 255);
+    crc_buf[1] = ((crc >> 16) & 255);
+    crc_buf[2] = ((crc >> 8) & 255);
+    crc_buf[3] = (crc & 255);
+    fwrite(crc_buf, 1, 4, fd);
+    free(crc_buf);
+}
+
+routine png_write(string filename, Image img, int quality) -> int {
+    string fd = fopen(filename, "wb");
+    if (int(fd) == 0) {
+        return 1;
+    }
+    
+    // PNG Signature
+    string sig = malloc(8);
+    sig[0] = 137; sig[1] = 80; sig[2] = 78; sig[3] = 71;
+    sig[4] = 13; sig[5] = 10; sig[6] = 26; sig[7] = 10;
+    fwrite(sig, 1, 8, fd);
+    free(sig);
+    
+    // IHDR
+    string ihdr = malloc(13);
+    ihdr[0] = ((img.width >> 24) & 255); ihdr[1] = ((img.width >> 16) & 255); ihdr[2] = ((img.width >> 8) & 255); ihdr[3] = (img.width & 255);
+    ihdr[4] = ((img.height >> 24) & 255); ihdr[5] = ((img.height >> 16) & 255); ihdr[6] = ((img.height >> 8) & 255); ihdr[7] = (img.height & 255);
+    ihdr[8] = 8; // Bit depth
+    int color_type = 2; // RGB
+    if (img.channels == 4) { color_type = 6; }
+    if (img.channels == 1) { color_type = 0; }
+    ihdr[9] = color_type;
+    ihdr[10] = 0; // Compression (Deflate)
+    ihdr[11] = 0; // Filter
+    ihdr[12] = 0; // Interlace
+    
+    write_chunk(fd, "IHDR", ihdr, 13);
+    free(ihdr);
+    
+    // IDAT
+    int filtered_len = 0;
+    string filtered = filter_png(img.data, img.width, img.height, img.channels, &filtered_len);
+    
+    int compressed_len = 0;
+    string compressed = deflate_compress_fixed_huffman(filtered, filtered_len, &compressed_len, quality);
+    
+    write_chunk(fd, "IDAT", compressed, compressed_len);
+    free(filtered);
+    free(compressed);
+    
+    // IEND
+    string iend = malloc(0);
+    write_chunk(fd, "IEND", iend, 0);
+    free(iend);
+    
+    fclose(fd);
+    return 0;
+}

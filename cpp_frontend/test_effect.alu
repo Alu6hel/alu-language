@@ -1,0 +1,15 @@
+effect FileSystem { 
+    routine open(string path) -> int; 
+}
+
+routine main() -> void {
+    handle FileSystem {
+        on open(string p) {
+            resume(1);
+        }
+    } in do_stuff();
+}
+
+routine do_stuff() -> void {
+    int fd = yield FileSystem.open("test.txt");
+}

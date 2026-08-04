@@ -1,0 +1,7 @@
+com.example.alu.sdk.alu-sdk-pngs-0 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\build\generated\res\pngs\release
+com.example.alu.sdk.alu-sdk-updated_navigation_xml-1 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\build\generated\updated_navigation_xml\release
+com.example.alu.sdk.alu-sdk-mergeReleaseResources-2 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\build\intermediates\incremental\release\mergeReleaseResources\merged.dir
+com.example.alu.sdk.alu-sdk-mergeReleaseResources-3 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\build\intermediates\incremental\release\mergeReleaseResources\stripped.dir
+com.example.alu.sdk.alu-sdk-release-4 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\build\intermediates\merged_res\release\mergeReleaseResources
+com.example.alu.sdk.alu-sdk-main-5 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\src\main\res
+com.example.alu.sdk.alu-sdk-release-6 C:\Users\Alu\source\repos\Alu6hel\alu-language\android-app\alu-sdk\src\release\res

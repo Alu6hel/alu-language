@@ -2,10 +2,8 @@ routine calculate_secret(int start, int limit) -> int {
     int counter = start;
     int accumulator = 0;
     
-    while (counter < limit) {
-        accumulator = accumulator + 5;
-        counter = counter + 1;
-    }
+    for (; counter < limit; counter = counter + 1) { accumulator = accumulator + 5;
+         }
     
     return accumulator;
 }

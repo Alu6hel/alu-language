@@ -1,0 +1,160 @@
+// ALU Native Standard Library: Image Filters
+// Implements Gaussian Blur and Hybrid Image blending (Spatial Frequency Filtering)
+
+import "std/image.alu";
+import "std/mem.alu";
+
+// Fast O(N) Box Blur approximation of Gaussian Blur
+routine box_blur_h(Image src, Image dst, int r) -> void {
+    string s = src.data;
+    string d = dst.data;
+    int w = src.width;
+    int h = src.height;
+    int c = src.channels;
+
+    for (int y = 0; y < h; y = y + 1) {
+        for (int ch = 0; ch < c; ch = ch + 1) {
+            int sum = 0;
+            // Initial sum
+            for (int i = (0-r); i <= r; i = i + 1) {
+                int px = i;
+                if (px < 0) { px = 0; }
+                if (px >= w) { px = w - 1; }
+                int idx = ((y * w) + px) * c + ch;
+                int val = int(s[idx]) & 255;
+                sum = sum + val;
+            }
+            
+            // Sliding window
+            for (int x = 0; x < w; x = x + 1) {
+                int out_idx = ((y * w) + x) * c + ch;
+                d[out_idx] = (sum / (r * 2 + 1)) & 255;
+
+                // Add next pixel, remove previous
+                int next_x = x + r + 1;
+                if (next_x >= w) { next_x = w - 1; }
+                int prev_x = x - r;
+                if (prev_x < 0) { prev_x = 0; }
+                
+                int next_val = int(s[((y * w) + next_x) * c + ch]) & 255;
+                int prev_val = int(s[((y * w) + prev_x) * c + ch]) & 255;
+                
+                sum = sum + next_val - prev_val;
+            }
+        }
+    }
+}
+
+routine box_blur_v(Image src, Image dst, int r) -> void {
+    string s = src.data;
+    string d = dst.data;
+    int w = src.width;
+    int h = src.height;
+    int c = src.channels;
+
+    for (int x = 0; x < w; x = x + 1) {
+        for (int ch = 0; ch < c; ch = ch + 1) {
+            int sum = 0;
+            // Initial sum
+            for (int i = (0-r); i <= r; i = i + 1) {
+                int py = i;
+                if (py < 0) { py = 0; }
+                if (py >= h) { py = h - 1; }
+                int idx = ((py * w) + x) * c + ch;
+                int val = int(s[idx]) & 255;
+                sum = sum + val;
+            }
+            
+            // Sliding window
+            for (int y = 0; y < h; y = y + 1) {
+                int out_idx = ((y * w) + x) * c + ch;
+                d[out_idx] = (sum / (r * 2 + 1)) & 255;
+
+                int next_y = y + r + 1;
+                if (next_y >= h) { next_y = h - 1; }
+                int prev_y = y - r;
+                if (prev_y < 0) { prev_y = 0; }
+                
+                int next_val = int(s[((next_y * w) + x) * c + ch]) & 255;
+                int prev_val = int(s[((prev_y * w) + x) * c + ch]) & 255;
+                
+                sum = sum + next_val - prev_val;
+            }
+        }
+    }
+}
+
+routine gaussian_blur(Image img, int radius) -> Image {
+    Image tmp;
+    tmp.width = img.width;
+    tmp.height = img.height;
+    tmp.channels = img.channels;
+    tmp.data = malloc(img.width * img.height * img.channels);
+
+    Image out;
+    out.width = img.width;
+    out.height = img.height;
+    out.channels = img.channels;
+    out.data = malloc(img.width * img.height * img.channels);
+
+    // 3 passes of box blur approximates a Gaussian blur
+    box_blur_h(img, tmp, radius);
+    box_blur_v(tmp, out, radius);
+    
+    box_blur_h(out, tmp, radius);
+    box_blur_v(tmp, out, radius);
+    
+    box_blur_h(out, tmp, radius);
+    box_blur_v(tmp, out, radius);
+
+    free(tmp.data);
+    return out;
+}
+
+// Low frequency = Blurred
+// High frequency = Original - Blurred
+// Hybrid = LowFrequency(img1) + HighFrequency(img2)
+routine blend_hybrid(Image low_img, Image high_img, int radius) -> Image {
+    printf("Blurring low-frequency image...\n");
+    Image blurred_low = gaussian_blur(low_img, radius);
+    
+    printf("Blurring high-frequency image...\n");
+    Image blurred_high = gaussian_blur(high_img, radius);
+
+    Image out;
+    out.width = low_img.width;
+    out.height = low_img.height;
+    out.channels = low_img.channels;
+    out.data = malloc(out.width * out.height * out.channels);
+
+    string out_d = out.data;
+    string low_d = blurred_low.data;
+    string orig_high_d = high_img.data;
+    string blur_high_d = blurred_high.data;
+
+    int size = out.width * out.height * out.channels;
+
+    printf("Blending spatial frequencies...\n");
+    for (int i = 0; i < size; i = i + 1) {
+        int low_val = int(low_d[i]) & 255;
+        
+        int orig_h_val = int(orig_high_d[i]) & 255;
+        int blur_h_val = int(blur_high_d[i]) & 255;
+        
+        // High frequency component
+        int high_val = orig_h_val - blur_h_val;
+        
+        // Combine them
+        int final_val = low_val + high_val;
+        
+        if (final_val < 0) { final_val = 0; }
+        if (final_val > 255) { final_val = 255; }
+        
+        out_d[i] = final_val & 255;
+    }
+
+    free(blurred_low.data);
+    free(blurred_high.data);
+
+    return out;
+}

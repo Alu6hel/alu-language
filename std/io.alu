@@ -1,22 +1,41 @@
-// ST-03: Standard Library Expansion (IO)
-// File streaming and TCP/UDP socket management
+// ALU Native Standard Library: io
+// Bindings to libc <stdio.h> for console I/O
 
-routine read_file(path_ptr, buffer) {
-    @requires path_ptr != null
-    @requires buffer != null
-    
-    // Call host OS FFI trampoline
-    // Zero-copy file streaming via DMA bounds mapping
-    unsafe {
-        asm("call_trampoline POSIX_READ, path_ptr, buffer")
-    }
+extern routine printf(string format, ...) -> int;
+extern routine puts(string str) -> int;
+extern routine scanf(string format, ...) -> int;
+extern routine getchar() -> int;
+extern routine putchar(int c) -> int;
+extern routine perror(string s) -> void;
+extern routine system(string command) -> int;
+extern routine fflush(int stream) -> int;
+extern routine sprintf(string str, string format, ...) -> int;
+
+routine print(string s) -> void {
+    puts(s);
 }
 
-routine bind_socket(port) {
-    @requires port > 0
-    @requires port < 65536
-    
-    unsafe {
-        asm("call_trampoline POSIX_BIND, port")
+// Binary File I/O
+extern routine fopen(string filename, string mode) -> string;
+extern routine fread(string ptr, int size, int count, string stream) -> int;
+extern routine fwrite(string ptr, int size, int count, string stream) -> int;
+extern routine fclose(string stream) -> int;
+extern routine fseek(string stream, int offset, int origin) -> int;
+
+// Legacy routines for compatibility
+routine read_file_legacy(string path_ptr, string buffer) -> int {
+    string f = fopen(path_ptr, "rb");
+    int bytes = 0;
+    if (int(f) != 0) {
+        bytes = fread(buffer, 1, 1024 * 1024, f);
+        fclose(f);
     }
+    return bytes;
+}
+
+routine bind_socket_legacy(int port) -> int {
+    unsafe {
+        asm("call_trampoline POSIX_BIND, port");
+    }
+    return 0;
 }

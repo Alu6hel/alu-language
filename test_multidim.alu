@@ -1,0 +1,24 @@
+extern routine puts(string s) -> int;
+extern routine print_num(int n) -> int;
+extern routine test_host_alloc() -> byte**;
+
+routine main() -> int {
+    // Get a 2D byte array from the host (byte**)
+    byte** matrix = test_host_alloc();
+    
+    // Test multi-dimensional reading
+    byte v1 = matrix[0][0];
+    byte v2 = matrix[1][2];
+    
+    // Print read values (should be 10 and 20)
+    print_num(int(v1));
+    print_num(int(v2));
+    
+    // Test multi-dimensional assignment
+    matrix[0][1] = byte(255);
+    byte v3 = matrix[0][1];
+    print_num(int(v3));
+    
+    puts("Multi-dim array test complete.");
+    return 0;
+}

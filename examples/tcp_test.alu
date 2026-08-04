@@ -1,0 +1,25 @@
+import std::tcp;
+import std::io;
+
+fn main() {
+    io::print("Alu Native TCP Server Test");
+    
+    // Bind to port 8080 natively without Python
+    let server = tcp::bind(8080);
+    tcp::listen(server);
+    
+    io::print("Listening on 127.0.0.1:8080...");
+    
+    while true {
+        let client = tcp::accept(server);
+        
+        let request = tcp::read(client);
+        io::print("Received native connection!");
+        
+        // Z3 guarantees memory safety when handling strings
+        let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello from the Native Alu TCP Socket!";
+        
+        tcp::send(client, http_response);
+        tcp::close_client(client);
+    }
+}

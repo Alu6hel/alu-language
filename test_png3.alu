@@ -1,0 +1,4 @@
+import "std/png.alu";
+routine main() -> int {
+    return 0;
+}

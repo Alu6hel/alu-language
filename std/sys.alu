@@ -1,12 +1,14 @@
-// ST-01: System FFI Trampolines
+// ALU Native Standard Library: sys
+// Bindings to libc <stdlib.h> system functions
 
-routine call_host_api(symbol, ptr) {
-    // We use Hoare logic to ensure the pointer is valid before jumping to C
-    @requires ptr != null
-    
+extern routine exit(int status) -> void;
+extern routine system(string command) -> int;
+extern routine getenv(string name) -> string;
+
+// Fallback trampoline (kept for compatibility)
+routine call_host_api(string symbol, string ptr) -> int {
     unsafe {
-        // This triggers the FFI Trampoline JIT compilation in the emitter
-        asm("call_trampoline symbol, ptr")
-        return 0
+        asm("call_trampoline symbol, ptr");
+        return 0;
     }
 }

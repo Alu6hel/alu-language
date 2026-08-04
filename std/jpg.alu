@@ -1,0 +1,41 @@
+// ALU Native Standard Library: JPG Decoder/Encoder
+// Backed by C FFI (stb_image) for fast and robust JPEG support
+
+import "std/io.alu";
+import "std/mem.alu";
+import "std/image.alu";
+
+routine jpg_read(string filename) -> Image {
+    Image img;
+    img.width = 0;
+    img.height = 0;
+    img.channels = 0;
+
+    int w = 0;
+    int h = 0;
+    int c = 0;
+    
+    string data = image_load(filename, &w, &h, &c, 3);
+    
+    if (int(data) == 0) {
+        puts("Failed to decode JPG file.");
+        return img;
+    }
+    
+    img.width = w;
+    img.height = h;
+    img.channels = 3;
+    img.data = data;
+    
+    return img;
+}
+
+routine jpg_write(string filename, Image img, int quality) -> int {
+    if (int(img.data) == 0) {
+        puts("Cannot write empty image.");
+        return 0;
+    }
+    
+    int success = image_save_jpg(filename, img.width, img.height, img.channels, img.data, quality);
+    return success;
+}

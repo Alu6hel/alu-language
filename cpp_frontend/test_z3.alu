@@ -1,0 +1,10 @@
+routine main(int input) -> int {
+    byte buf[10];
+    
+    // input could be up to 19, but buf is only 10 bytes!
+    if (input < 20) {
+        buf[input] = 255; 
+    }
+    
+    return 0;
+}

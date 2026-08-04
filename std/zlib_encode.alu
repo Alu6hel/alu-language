@@ -1,0 +1,174 @@
+// std/zlib_encode.alu - Deflate Dynamic/Fixed Huffman Compressor
+import "std/mem.alu";
+import "std/math.alu";
+import "std/png_enc.alu";
+import "std/zlib_enc.alu"; // LZ77
+import "std/zlib_huff.alu"; // Huffman
+
+routine get_len_code(int len, int* extra_bits, int* extra_val) -> int {
+    if (len == 3) { *extra_bits = 0; *extra_val = 0; return 257; }
+    if (len == 4) { *extra_bits = 0; *extra_val = 0; return 258; }
+    if (len == 5) { *extra_bits = 0; *extra_val = 0; return 259; }
+    if (len == 6) { *extra_bits = 0; *extra_val = 0; return 260; }
+    if (len == 7) { *extra_bits = 0; *extra_val = 0; return 261; }
+    if (len == 8) { *extra_bits = 0; *extra_val = 0; return 262; }
+    if (len == 9) { *extra_bits = 0; *extra_val = 0; return 263; }
+    if (len == 10) { *extra_bits = 0; *extra_val = 0; return 264; }
+    if ((len >= 11) & (len <= 12)) { *extra_bits = 1; *extra_val = (len - 11); return 265; }
+    if ((len >= 13) & (len <= 14)) { *extra_bits = 1; *extra_val = (len - 13); return 266; }
+    if ((len >= 15) & (len <= 16)) { *extra_bits = 1; *extra_val = (len - 15); return 267; }
+    if ((len >= 17) & (len <= 18)) { *extra_bits = 1; *extra_val = (len - 17); return 268; }
+    if ((len >= 19) & (len <= 22)) { *extra_bits = 2; *extra_val = (len - 19); return 269; }
+    if ((len >= 23) & (len <= 26)) { *extra_bits = 2; *extra_val = (len - 23); return 270; }
+    if ((len >= 27) & (len <= 30)) { *extra_bits = 2; *extra_val = (len - 27); return 271; }
+    if ((len >= 31) & (len <= 34)) { *extra_bits = 2; *extra_val = (len - 31); return 272; }
+    if ((len >= 35) & (len <= 42)) { *extra_bits = 3; *extra_val = (len - 35); return 273; }
+    if ((len >= 43) & (len <= 50)) { *extra_bits = 3; *extra_val = (len - 43); return 274; }
+    if ((len >= 51) & (len <= 58)) { *extra_bits = 3; *extra_val = (len - 51); return 275; }
+    if ((len >= 59) & (len <= 66)) { *extra_bits = 3; *extra_val = (len - 59); return 276; }
+    if ((len >= 67) & (len <= 82)) { *extra_bits = 4; *extra_val = (len - 67); return 277; }
+    if ((len >= 83) & (len <= 98)) { *extra_bits = 4; *extra_val = (len - 83); return 278; }
+    if ((len >= 99) & (len <= 114)) { *extra_bits = 4; *extra_val = (len - 99); return 279; }
+    if ((len >= 115) & (len <= 130)) { *extra_bits = 4; *extra_val = (len - 115); return 280; }
+    if ((len >= 131) & (len <= 162)) { *extra_bits = 5; *extra_val = (len - 131); return 281; }
+    if ((len >= 163) & (len <= 194)) { *extra_bits = 5; *extra_val = (len - 163); return 282; }
+    if ((len >= 195) & (len <= 226)) { *extra_bits = 5; *extra_val = (len - 195); return 283; }
+    if ((len >= 227) & (len <= 257)) { *extra_bits = 5; *extra_val = (len - 227); return 284; }
+    if (len == 258) { *extra_bits = 0; *extra_val = 0; return 285; }
+    return 0;
+}
+
+routine get_dist_code(int dist, int* extra_bits, int* extra_val) -> int {
+    if (dist == 1) { *extra_bits = 0; *extra_val = 0; return 0; }
+    if (dist == 2) { *extra_bits = 0; *extra_val = 0; return 1; }
+    if (dist == 3) { *extra_bits = 0; *extra_val = 0; return 2; }
+    if (dist == 4) { *extra_bits = 0; *extra_val = 0; return 3; }
+    if ((dist >= 5) & (dist <= 6)) { *extra_bits = 1; *extra_val = (dist - 5); return 4; }
+    if ((dist >= 7) & (dist <= 8)) { *extra_bits = 1; *extra_val = (dist - 7); return 5; }
+    if ((dist >= 9) & (dist <= 12)) { *extra_bits = 2; *extra_val = (dist - 9); return 6; }
+    if ((dist >= 13) & (dist <= 16)) { *extra_bits = 2; *extra_val = (dist - 13); return 7; }
+    if ((dist >= 17) & (dist <= 24)) { *extra_bits = 3; *extra_val = (dist - 17); return 8; }
+    if ((dist >= 25) & (dist <= 32)) { *extra_bits = 3; *extra_val = (dist - 25); return 9; }
+    if ((dist >= 33) & (dist <= 48)) { *extra_bits = 4; *extra_val = (dist - 33); return 10; }
+    if ((dist >= 49) & (dist <= 64)) { *extra_bits = 4; *extra_val = (dist - 49); return 11; }
+    if ((dist >= 65) & (dist <= 96)) { *extra_bits = 5; *extra_val = (dist - 65); return 12; }
+    if ((dist >= 97) & (dist <= 128)) { *extra_bits = 5; *extra_val = (dist - 97); return 13; }
+    if ((dist >= 129) & (dist <= 192)) { *extra_bits = 6; *extra_val = (dist - 129); return 14; }
+    if ((dist >= 193) & (dist <= 256)) { *extra_bits = 6; *extra_val = (dist - 193); return 15; }
+    if ((dist >= 257) & (dist <= 384)) { *extra_bits = 7; *extra_val = (dist - 257); return 16; }
+    if ((dist >= 385) & (dist <= 512)) { *extra_bits = 7; *extra_val = (dist - 385); return 17; }
+    if ((dist >= 513) & (dist <= 768)) { *extra_bits = 8; *extra_val = (dist - 513); return 18; }
+    if ((dist >= 769) & (dist <= 1024)) { *extra_bits = 8; *extra_val = (dist - 769); return 19; }
+    if ((dist >= 1025) & (dist <= 1536)) { *extra_bits = 9; *extra_val = (dist - 1025); return 20; }
+    if ((dist >= 1537) & (dist <= 2048)) { *extra_bits = 9; *extra_val = (dist - 1537); return 21; }
+    if ((dist >= 2049) & (dist <= 3072)) { *extra_bits = 10; *extra_val = (dist - 2049); return 22; }
+    if ((dist >= 3073) & (dist <= 4096)) { *extra_bits = 10; *extra_val = (dist - 3073); return 23; }
+    if ((dist >= 4097) & (dist <= 6144)) { *extra_bits = 11; *extra_val = (dist - 4097); return 24; }
+    if ((dist >= 6145) & (dist <= 8192)) { *extra_bits = 11; *extra_val = (dist - 6145); return 25; }
+    if ((dist >= 8193) & (dist <= 12288)) { *extra_bits = 12; *extra_val = (dist - 8193); return 26; }
+    if ((dist >= 12289) & (dist <= 16384)) { *extra_bits = 12; *extra_val = (dist - 12289); return 27; }
+    if ((dist >= 16385) & (dist <= 24576)) { *extra_bits = 13; *extra_val = (dist - 16385); return 28; }
+    if ((dist >= 24577) & (dist <= 32768)) { *extra_bits = 13; *extra_val = (dist - 24577); return 29; }
+    return 0;
+}
+
+routine reverse_bits(int v, int num_bits) -> int {
+    int res = 0;
+    for (int i = 0; i < num_bits; i = (i + 1)) {
+        if ((v & (1 << i)) != 0) {
+            res = (res | (1 << ((num_bits - 1) - i)));
+        }
+    }
+    return res;
+}
+
+routine deflate_compress_fixed_huffman(string data, int length, int* out_len, int quality) -> string {
+    int max_out = (length + (length / 2) + 1024);
+    string out_buf = malloc(max_out);
+    BitWriter bw;
+    bw_init(&bw, out_buf);
+    
+    // Zlib Header
+    bw_write_bits(&bw, 120, 8); // CMF
+    bw_write_bits(&bw, 1, 8); // FLG
+    
+    int token_count = 0;
+    string tokens = lz77_compress(data, length, &token_count, quality);
+    
+    // Final block, Fixed Huffman (BTYPE=01)
+    bw_write_bits(&bw, 1, 1); // BFINAL=1
+    bw_write_bits(&bw, 1, 2); // BTYPE=01
+    
+    int t_type = 0;
+    int t_val1 = 0;
+    int t_val2 = 0;
+    int code1 = 0; int len1 = 0;
+    int rev = 0;
+    int ex_bits = 0; int ex_val = 0;
+    int lcode = 0;
+    int code2 = 0; int len2 = 0;
+    int rev2 = 0;
+    int d_ex_bits = 0; int d_ex_val = 0;
+    int dcode = 0;
+    int d_rev = 0;
+    
+    for (int i = 0; i < token_count; i = (i + 1)) {
+        t_type = get_int(tokens, (i * 3));
+        t_val1 = get_int(tokens, ((i * 3) + 1));
+        t_val2 = get_int(tokens, ((i * 3) + 2));
+        
+        if (t_type == 0) {
+            // Literal
+            code1 = 0; len1 = 0;
+            if (t_val1 <= 143) {
+                code1 = (t_val1 + 48); len1 = 8;
+            } else {
+                code1 = ((t_val1 - 144) + 400); len1 = 9;
+            }
+            rev = reverse_bits(code1, len1);
+            bw_write_bits(&bw, rev, len1);
+        } else {
+            // Match
+            ex_bits = 0; ex_val = 0;
+            lcode = get_len_code(t_val1, &ex_bits, &ex_val);
+            code2 = 0; len2 = 0;
+            if (lcode <= 279) {
+                code2 = ((lcode - 256) + 0); len2 = 7;
+            } else {
+                code2 = ((lcode - 280) + 192); len2 = 8;
+            }
+            rev2 = reverse_bits(code2, len2);
+            bw_write_bits(&bw, rev2, len2);
+            if (ex_bits > 0) {
+                bw_write_bits(&bw, ex_val, ex_bits);
+            }
+            
+            d_ex_bits = 0; d_ex_val = 0;
+            dcode = get_dist_code(t_val2, &d_ex_bits, &d_ex_val);
+            d_rev = reverse_bits(dcode, 5);
+            bw_write_bits(&bw, d_rev, 5);
+            if (d_ex_bits > 0) {
+                bw_write_bits(&bw, d_ex_val, d_ex_bits);
+            }
+        }
+        
+    }
+    
+    // End of block (code 256)
+    int rev_eob = reverse_bits(0, 7); // 256 in fixed is code 0 (7 bits)
+    bw_write_bits(&bw, rev_eob, 7);
+    
+    bw_flush(&bw);
+    
+    int adler = adler32(data, length);
+    string b2 = bw.buf;
+    b2[bw.byte_pos] = ((adler >> 24) & 255); bw.byte_pos = (bw.byte_pos + 1);
+    b2[bw.byte_pos] = ((adler >> 16) & 255); bw.byte_pos = (bw.byte_pos + 1);
+    b2[bw.byte_pos] = ((adler >> 8) & 255); bw.byte_pos = (bw.byte_pos + 1);
+    b2[bw.byte_pos] = (adler & 255); bw.byte_pos = (bw.byte_pos + 1);
+    
+    free(tokens);
+    
+    *out_len = bw.byte_pos;
+    return out_buf;
+}

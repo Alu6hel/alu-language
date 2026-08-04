@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alu Web Engine - WASM Next-Gen Photo Processing</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <main class="glass-container">
+        <header>
+            <div class="logo">ALU Web Engine <span>WASM</span></div>
+            <nav>
+                <a href="#" class="active">Processor</a>
+                <a href="#">Hybrid Filter</a>
+                <a href="#">WASM Benchmark</a>
+            </nav>
+        </header>
+
+        <section class="hero">
+            <h1>Zero-Latency Photo Processing.</h1>
+            <p>Running native LLVM-compiled Alu code directly in the browser via WebAssembly.</p>
+        </section>
+
+        <section class="workspace">
+            <div class="upload-zone" id="drop-zone">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="17 8 12 3 7 8"></polyline>
+                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <h3>Drop your high-res RAW or JPEG here</h3>
+                <p>Processed entirely client-side using Alu WASM.</p>
+                <input type="file" id="file-input" hidden accept="image/*">
+                <button class="btn-primary" onclick="document.getElementById('file-input').click()">Browse Files</button>
+            </div>
+
+            <div class="controls-panel glass-panel">
+                <h3>Parameters</h3>
+                <div class="slider-group">
+                    <label>Scale Factor <span id="scale-val">100%</span></label>
+                    <input type="range" min="10" max="200" value="100" class="glass-slider" id="scale-slider">
+                </div>
+                <div class="slider-group">
+                    <label>JPEG Quality <span id="qual-val">80</span></label>
+                    <input type="range" min="1" max="100" value="80" class="glass-slider" id="qual-slider">
+                </div>
+                <div class="slider-group">
+                    <label>Blur Radius (Spatial Filter) <span id="blur-val">0</span></label>
+                    <input type="range" min="0" max="50" value="0" class="glass-slider" id="blur-slider">
+                </div>
+                
+                <div class="action-row">
+                    <button class="btn-secondary" id="process-btn">
+                        <span class="btn-text">Execute WASM Routine</span>
+                        <div class="spinner"></div>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section class="preview-area">
+            <div class="canvas-container">
+                <canvas id="preview-canvas"></canvas>
+                <div class="status-overlay" id="status-overlay">Waiting for image...</div>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

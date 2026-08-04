@@ -1,0 +1,42 @@
+extern routine printf(string s) -> void;
+
+struct MyStruct {
+    int value;
+}
+
+routine throw_error() -> void {
+    printf("  Throwing exception...\n");
+    throw "Error Occurred";
+}
+
+routine test_nested_scopes() -> void {
+    string msg1 = "Outer Scope";
+    MyStruct outer_struct = new MyStruct;
+    outer_struct.value = 10;
+    
+    try {
+        string msg2 = "Inside Try";
+        MyStruct inner_struct = new MyStruct;
+        inner_struct.value = 20;
+        
+        if (inner_struct.value == 20) {
+            string msg3 = "Inside If";
+            MyStruct deeply_nested = new MyStruct;
+            deeply_nested.value = 30;
+            
+            throw_error(); // Exception should unwind deeply_nested, inner_struct, then jump to catch
+            
+            printf("  This should not be printed!\n");
+        }
+    } catch (string e) {
+        printf("  Caught exception!\n");
+    }
+    
+    printf("  Test finished!\n");
+}
+
+routine main() -> void {
+    printf("Starting Stack Unwinding Test...\n");
+    test_nested_scopes();
+    printf("Done.\n");
+}

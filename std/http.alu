@@ -1,0 +1,30 @@
+// Alu Standard Library: HTTP Client
+// Built natively on top of std::tcp
+
+import "../std/tcp.alu";
+
+routine http_get(string host, int port, string path) -> string {
+    // 1. Connect to the server
+    Client client = tcp_connect(host, port);
+    
+    // 2. Format the HTTP GET request
+    // We use basic string concatenation which Alu LLVM handles via string builder or native puts equivalents
+    // For this prototype, we'll assume a built-in format or just send raw strings sequentially
+    
+    tcp_send(client, "GET ");
+    tcp_send(client, path);
+    tcp_send(client, " HTTP/1.1\r\n");
+    tcp_send(client, "Host: ");
+    tcp_send(client, host);
+    tcp_send(client, "\r\n");
+    tcp_send(client, "Connection: close\r\n");
+    tcp_send(client, "\r\n");
+    
+    // 3. Read the response
+    string response = tcp_read(client);
+    
+    // 4. Close the socket
+    tcp_close_client(client);
+    
+    return response;
+}

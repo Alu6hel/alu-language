@@ -1,0 +1,62 @@
+// Alu Standard Library: Native TCP Sockets
+// Backed by Winsock2 (Windows)
+
+extern routine net_init() -> void;
+extern routine net_tcp_listen(int port) -> int;
+extern routine net_tcp_accept(int socket_fd) -> int;
+extern routine net_tcp_connect(string host, int port) -> int;
+extern routine net_tcp_send(int client_fd, string data, int len) -> int;
+extern routine net_tcp_recv(int client_fd, string buffer, int max_len) -> int;
+extern routine net_close(int fd) -> void;
+
+struct Socket {
+    int fd;
+}
+
+struct Client {
+    int fd;
+}
+
+routine tcp_bind(int port) -> Socket {
+    net_init();
+    int fd = net_tcp_listen(port);
+    Socket s;
+    s.fd = fd;
+    return s;
+}
+
+routine tcp_connect(string host, int port) -> Client {
+    net_init();
+    int fd = net_tcp_connect(host, port);
+    Client c;
+    c.fd = fd;
+    return c;
+}
+
+routine tcp_listen(Socket sock) -> void {
+    // Already listening via net_tcp_listen in bind
+}
+
+routine tcp_accept(Socket sock) -> Client {
+    int client_fd = net_tcp_accept(sock.fd);
+    Client c;
+    c.fd = client_fd;
+    return c;
+}
+
+routine tcp_send(Client client, string data) -> void {
+    net_tcp_send(client.fd, data, 1024); // mock length
+}
+
+routine tcp_read(Client client) -> string {
+    // mock implementation, returns an empty string for now
+    return "mocked";
+}
+
+routine tcp_close_client(Client client) -> void {
+    net_close(client.fd);
+}
+
+routine tcp_close_socket(Socket sock) -> void {
+    net_close(sock.fd);
+}

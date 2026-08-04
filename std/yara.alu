@@ -1,0 +1,8 @@
+// YARA-Lite Signature Engine for Aegis Mobile
+// This module provides zero-dependency, high-performance binary signature matching
+
+extern routine yara_create_rule() -> int;
+extern routine yara_add_hex_pattern(int rule_id, string hex_str) -> void;
+extern routine yara_add_string_pattern(int rule_id, string text_str) -> void;
+extern routine yara_scan_file(int rule_id, string filepath) -> int;
+extern routine yara_scan_buffer(int rule_id, string data, int length) -> int;

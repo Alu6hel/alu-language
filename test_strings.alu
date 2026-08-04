@@ -1,0 +1,22 @@
+import "std.alu";
+
+routine main() -> int {
+    string a = "Hello";
+    string b = "World";
+    
+    int len_a = str_len(a);
+    printf("Length of a: %d\n", len_a);
+    
+    int eq = str_eq(a, b);
+    printf("a == b? %d\n", eq);
+    
+    string c = str_cat(a, b);
+    printf("a + b: %s\n", c);
+    
+    int eq2 = str_eq(a, "Hello");
+    printf("a == Hello? %d\n", eq2);
+    
+    free(c);
+    
+    return 0;
+}

@@ -1,0 +1,22 @@
+struct Box<T> {
+    T value;
+}
+
+struct Pair<T, U> {
+    T first;
+    U second;
+}
+
+routine main() -> int {
+    Box<int> intBox;
+    intBox.value = 42;
+
+    Box<float> floatBox;
+    floatBox.value = 3.14;
+
+    Pair<int, float> p;
+    p.first = 10;
+    p.second = 20.5;
+
+    return intBox.value;
+}

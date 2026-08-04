@@ -1,0 +1,18 @@
+extern routine printf(string fmt, ...) -> void;
+
+routine main() -> int {
+    // Allocate an integer on the heap
+    int* a = new int;
+    *a = 100;
+    
+    // Assigning to a different pointer (should trigger retain and release)
+    int* b = a;
+    *b = 200;
+    
+    // Output should be 200
+    printf("b is %d\n", *b);
+    
+    // ARC: Both a and b go out of scope here. 
+    // They should be released, and the underlying memory freed automatically!
+    return *b;
+}

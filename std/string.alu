@@ -1,0 +1,11 @@
+// ALU Native Standard Library: string
+// Bindings to libc <string.h>
+
+extern routine strlen(string s) -> int;
+extern routine strcpy(string dest, string src) -> string;
+extern routine strncpy(string dest, string src, int n) -> string;
+extern routine strcmp(string s1, string s2) -> int;
+extern routine strncmp(string s1, string s2, int n) -> int;
+extern routine strcat(string dest, string src) -> string;
+extern routine strchr(string s, int c) -> string;
+extern routine strstr(string haystack, string needle) -> string;

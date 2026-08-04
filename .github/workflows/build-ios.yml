@@ -1,0 +1,32 @@
+name: Build iOS XCFramework
+
+on:
+  push:
+    branches: [ "main" ]
+  release:
+    types: [published]
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Build ALU Compiler
+        run: cargo build --release
+        
+      - name: Build iOS SDK
+        working-directory: ios-sdk
+        run: |
+          chmod +x build_ios.sh
+          ./build_ios.sh image_processor.alu
+          
+      - name: Upload XCFramework Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: AluSDK-iOS
+          path: ios-sdk/AluSDK.xcframework/

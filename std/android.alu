@@ -1,0 +1,25 @@
+// Java Native Interface (JNI) Bindings for Alu
+// This exposes Android OS hooks to native Alu code.
+
+struct JNIEnv {
+    int reserved;
+}
+
+struct jobject {
+    int reserved;
+}
+
+struct jstring {
+    int reserved;
+}
+
+struct jclass {
+    int reserved;
+}
+
+// JNI Function Bindings
+extern routine GetStringUTFChars(JNIEnv* env, jstring* str, int* isCopy) -> string;
+extern routine ReleaseStringUTFChars(JNIEnv* env, jstring* str, string chars) -> void;
+extern routine FindClass(JNIEnv* env, string name) -> jclass*;
+extern routine GetMethodID(JNIEnv* env, jclass* clazz, string name, string sig) -> int;
+extern routine CallVoidMethod(JNIEnv* env, jobject* obj, int methodID) -> void;

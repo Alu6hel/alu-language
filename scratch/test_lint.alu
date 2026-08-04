@@ -1,0 +1,3 @@
+routine BadCamelCase() {
+    image_load();
+ }

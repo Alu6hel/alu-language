@@ -1,0 +1,29 @@
+import "std.alu";
+
+routine main() -> int {
+    print("Welcome to ALU Core Library!");
+    
+    File f;
+    f.open("output.txt", "w");
+    f.write("Hello from native ALU standard library!\n", 40);
+    f.close();
+    print("File output.txt written successfully.");
+    
+    File fin;
+    fin.open("output.txt", "r");
+    
+    // Allocate a buffer on the heap using malloc (100 bytes)
+    string buffer;
+    buffer = malloc(100);
+    
+    fin.read(buffer, 100);
+    fin.close();
+    
+    print("Read from file:");
+    print(buffer);
+    
+    // Free the heap memory
+    free(buffer);
+    
+    return 0;
+}

@@ -20,7 +20,7 @@ struct Color {
 }
 
 // Extern bindings to a C Backend image handling (stb_image wrapper)
-extern routine image_load(string filename, string w_ptr, string h_ptr, string c_ptr, int req_comp) -> string;
+extern routine image_load(string filename, int* w_ptr, int* h_ptr, int* c_ptr, int req_comp) -> string;
 extern routine image_save_png(string filename, int w, int h, int comp, string data, int stride) -> int;
 extern routine image_save_jpg(string filename, int w, int h, int comp, string data, int quality) -> int;
 extern routine image_free(string data) -> void;
@@ -40,8 +40,7 @@ routine process_grayscale(Image img) -> void {
     int gray_sum = 0;
     int gray = 0;
     
-    while (i < size) {
-        r = d[i];
+    for (; i < size; i = i + img.channels) { r = d[i];
         g = d[i+1];
         b = d[i+2];
         
@@ -57,8 +56,7 @@ routine process_grayscale(Image img) -> void {
         d[i+1] = gray;
         d[i+2] = gray;
         
-        i = i + img.channels;
-    }
+         }
     
     puts("Applied native ALU grayscale transformation utilizing byte pointer indexing!");
 }

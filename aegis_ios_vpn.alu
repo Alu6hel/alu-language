@@ -1,0 +1,33 @@
+import "std/io.alu";
+import "std/yara.alu";
+import "std/packet.alu";
+import "std/swarm.alu";
+import "std/string.alu";
+
+// The iOS Network Extension Entry Point
+// Parses raw IP/TCP packets, extracts payload, runs YARA rules.
+// Returns 1 if packet should be dropped (threat), 0 if allowed (safe).
+routine process_packet(string raw_bytes, int length) -> int {
+    // 64KB Max TCP/UDP payload buffer
+    string payload = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"; 
+    
+    int payload_len = packet_extract_payload(raw_bytes, length, payload);
+    if (payload_len <= 0) {
+        // Not a data packet or unsupported, let it through
+        return 0; 
+    }
+    
+    // Scan extracted payload with Native YARA engine (Rule ID 0)
+    int is_threat = yara_scan_buffer(0, payload, payload_len);
+    
+    if (is_threat == 1) {
+        print("[AEGIS-VPN] !!! THREAT INTERCEPTED IN TRANSIT !!!");
+        print("[AEGIS-VPN] Dropping malicious packet.");
+        
+        // Optionally broadcast threat indicator to Swarm
+        swarm_broadcast(payload, 8000);
+        return 1;
+    }
+    
+    return 0; // Safe
+}

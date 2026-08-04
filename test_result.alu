@@ -1,0 +1,76 @@
+import "std.alu";
+
+routine divide(int a, int b) -> Result_Int {
+    Result_Int res;
+    if (b == 0) {
+        res.ok = 0;
+        res.value = 0;
+        res.error = "Divide by zero error";
+        return res;
+    }
+    res.ok = 1;
+    res.value = a / b;
+    res.error = "";
+    return res;
+}
+
+routine parse_int(string str) -> Result_Int {
+    Result_Int res;
+    // Mock parsing
+    if (str_eq(str, "invalid") == 1) {
+        res.ok = 0;
+        res.value = 0;
+        res.error = "Invalid integer format";
+        return res;
+    }
+    res.ok = 1;
+    res.value = 42;
+    res.error = "";
+    return res;
+}
+
+routine get_user_name(int id) -> Result_String {
+    Result_String res;
+    if (id < 0) {
+        res.ok = 0;
+        res.value = "";
+        res.error = "Invalid user ID";
+        return res;
+    }
+    res.ok = 1;
+    res.value = "Alice";
+    res.error = "";
+    return res;
+}
+
+routine main() -> int {
+    Result_Int div_res = divide(10, 2);
+    if (div_res.ok == 1) {
+        printf("10 / 2 = %d\n", div_res.value);
+    } else {
+        printf("Error: %s\n", div_res.error);
+    }
+    
+    Result_Int div_res2 = divide(10, 0);
+    if (div_res2.ok == 1) {
+        printf("10 / 0 = %d\n", div_res2.value);
+    } else {
+        printf("Error: %s\n", div_res2.error);
+    }
+    
+    Result_String user_res = get_user_name(5);
+    if (user_res.ok == 1) {
+        printf("User 5: %s\n", user_res.value);
+    } else {
+        printf("Error: %s\n", user_res.error);
+    }
+
+    Result_String user_res2 = get_user_name(0 - 1);
+    if (user_res2.ok == 1) {
+        printf("User -1: %s\n", user_res2.value);
+    } else {
+        printf("Error: %s\n", user_res2.error);
+    }
+    
+    return 0;
+}

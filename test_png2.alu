@@ -1,0 +1,35 @@
+extern routine printf(string fmt, int val) -> void;
+extern routine malloc(int size) -> int*;
+
+routine lsr1(int val) -> int {
+    int res = val >> 1;
+    if (val < 0) {
+        res = res & 2147483647;
+    }
+    return res;
+}
+
+routine build_crc_table(int* table) {
+    for (int i = 0; i < 256; i = i + 1) {
+        int crc = i;
+        for (int j = 0; j < 8; j = j + 1) {
+            if ((crc & 1) != 0) {
+                crc = lsr1(crc) ^ (0 - 306674912);
+            } else {
+                crc = lsr1(crc);
+            }
+        }
+        table[i] = crc;
+    }
+}
+
+routine main() -> int {
+    int* table = malloc(1024);
+    build_crc_table(table);
+    
+    int val1 = table[1];
+    int val2 = table[2];
+    printf("CRC[1] = %d\n", val1);
+    printf("CRC[2] = %d\n", val2);
+    return 0;
+}

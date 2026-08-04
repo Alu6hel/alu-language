@@ -1,0 +1,18 @@
+extern routine puts(string s) -> int;
+
+routine main() -> int {
+    int i = 255;
+    
+    // cast int to float
+    float f = float(i) * 1.5;
+    
+    // cast float to int
+    int scaled = int(f);
+    
+    // cast int to byte
+    byte b = byte(scaled);
+    
+    // Test that the syntax is accepted and the program runs correctly
+    puts("Explicit casting test complete.");
+    return 0;
+}

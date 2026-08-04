@@ -1,0 +1,33 @@
+extern routine puts(string s) -> int;
+
+routine main() -> int {
+    // Pack RGB into a single 32-bit integer: AARRGGBB
+    // Alpha: 255 (0xFF), Red: 128 (0x80), Green: 64 (0x40), Blue: 32 (0x20)
+    int a = 255;
+    int r = 128;
+    int g = 64;
+    int b = 32;
+    
+    // Shift and OR to pack
+    int packed = (a << 24) | (r << 16) | (g << 8) | b;
+    
+    // Unpack using shift and AND
+    int unpacked_a = (packed >> 24) & 255;
+    int unpacked_r = (packed >> 16) & 255;
+    int unpacked_g = (packed >> 8) & 255;
+    int unpacked_b = packed & 255;
+    
+    if (unpacked_a == a) {
+        if (unpacked_r == r) {
+            if (unpacked_g == g) {
+                if (unpacked_b == b) {
+                    puts("Bitwise pack/unpack successful!");
+                    return 0;
+                }
+            }
+        }
+    }
+    
+    puts("Bitwise test failed.");
+    return 1;
+}

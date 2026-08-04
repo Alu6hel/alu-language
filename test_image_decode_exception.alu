@@ -1,0 +1,27 @@
+extern routine printf(string s) -> void;
+extern routine image_load(string filename, int* w, int* h, int* c, int req_comp) -> string;
+extern routine image_free(string data) -> void;
+
+routine main() -> int {
+    printf("Testing image_load exception...\n");
+    
+    try {
+        int w = 0;
+        int h = 0;
+        int c = 0;
+        string filename = "does_not_exist.png";
+        
+        // This should fail and throw an exception instead of crashing
+        string img = image_load(filename, &w, &h, &c, 4);
+        
+        printf("Success? This should not print.\n");
+        image_free(img);
+    } catch (string e) {
+        printf("Caught exception: ");
+        printf(e);
+        printf("\n");
+    }
+    
+    printf("Test finished successfully.\n");
+    return 0;
+}

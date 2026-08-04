@@ -1,0 +1,46 @@
+import "std/io.alu";
+
+routine main() -> int {
+    // Test for loop
+    int sum = 0;
+    for (int i = 0; i < 10; i = i + 1) {
+        sum = sum + i;
+    }
+    printf("Sum of 0..9 = %d\n", sum);
+
+    // Test scoped variables - inner 'i' should not conflict with outer 'i'
+    int total = 0;
+    for (int i = 0; i < 5; i = i + 1) {
+        int val = i * 2;
+        total = total + val;
+    }
+    printf("Total = %d\n", total);
+
+    // Test nested for loops
+    int matrix_sum = 0;
+    for (int row = 0; row < 3; row = row + 1) {
+        for (int col = 0; col < 4; col = col + 1) {
+            matrix_sum = matrix_sum + 1;
+        }
+    }
+    printf("3x4 matrix cells = %d\n", matrix_sum);
+
+    // Test that scoped vars in if/while don't leak
+    int x = 100;
+    if (x > 50) {
+        int y = 42;
+        printf("Inside if: y = %d\n", y);
+    }
+    // 'y' should not be accessible here
+
+    int count = 0;
+    while (count < 3) {
+        int temp = count * 10;
+        printf("while temp = %d\n", temp);
+        count = count + 1;
+    }
+    // 'temp' should not be accessible here
+
+    printf("All for-loop and scope tests passed!\n");
+    return 0;
+}

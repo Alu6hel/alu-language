@@ -3,6 +3,11 @@
   "displayName": "ALU Language Support",
   "description": "Syntax highlighting and LSP for the ALU Systems Language",
   "version": "1.0.0",
+  "publisher": "AluTeam",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Alu6hel/alu-language"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -10,6 +15,47 @@
     "Programming Languages"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "alu.helloWorld",
+        "title": "Hello World"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "alu-debug",
+        "label": "Alu Interactive Debugger",
+        "program": "./out/extension.js",
+        "runtime": "node",
+        "languages": ["alu"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path to the .alu file.",
+                "default": "${workspaceFolder}/src/main.alu"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Automatically stop after launch.",
+                "default": true
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "alu-debug",
+            "request": "launch",
+            "name": "Debug Alu Program",
+            "program": "${workspaceFolder}/src/main.alu",
+            "stopOnEntry": true
+          }
+        ]
+      }
+    ],
     "languages": [
       {
         "id": "alu",

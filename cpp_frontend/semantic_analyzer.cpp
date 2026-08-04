@@ -2,7 +2,106 @@
 #include <stdexcept>
 #include <iostream>
 
+// --- Scope Management ---
+
+void SemanticAnalyzer::pushScope() {
+    scope_stack.emplace_back();
+    struct_var_stack.emplace_back();
+}
+
+void SemanticAnalyzer::popScope() {
+    if (!scope_stack.empty()) scope_stack.pop_back();
+    if (!struct_var_stack.empty()) struct_var_stack.pop_back();
+}
+
+bool SemanticAnalyzer::lookupSymbol(const std::string& name, DataType& outType) {
+    // Search from innermost scope to outermost
+    for (int i = (int)scope_stack.size() - 1; i >= 0; --i) {
+        auto it = scope_stack[i].find(name);
+        if (it != scope_stack[i].end()) {
+            outType = it->second;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SemanticAnalyzer::lookupStructVar(const std::string& name, std::string& outStructName) {
+    for (int i = (int)struct_var_stack.size() - 1; i >= 0; --i) {
+        auto it = struct_var_stack[i].find(name);
+        if (it != struct_var_stack[i].end()) {
+            outStructName = it->second;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SemanticAnalyzer::isDeclaredInCurrentScope(const std::string& name) {
+    if (scope_stack.empty()) return false;
+    return scope_stack.back().find(name) != scope_stack.back().end();
+}
+
+void SemanticAnalyzer::declareSymbol(const std::string& name, DataType type) {
+    if (!scope_stack.empty()) {
+        scope_stack.back()[name] = type;
+    }
+}
+
+void SemanticAnalyzer::declareStructVar(const std::string& name, const std::string& structName) {
+    if (!struct_var_stack.empty()) {
+        struct_var_stack.back()[name] = structName;
+    }
+}
+
+void SemanticAnalyzer::instantiateTemplateIfNeeded(const std::string& typeStr) {
+    size_t less_idx = typeStr.find('<');
+    if (less_idx == std::string::npos) return;
+    
+    if (struct_table.find(typeStr) != struct_table.end()) return;
+    
+    std::string baseName = typeStr.substr(0, less_idx);
+    if (struct_templates.find(baseName) == struct_templates.end()) return;
+    
+    StructDefNode* tmpl = struct_templates[baseName];
+    
+    std::string args_str = typeStr.substr(less_idx + 1, typeStr.length() - less_idx - 2);
+    std::vector<std::string> args;
+    size_t last = 0;
+    size_t next = 0;
+    while ((next = args_str.find(',', last)) != std::string::npos) {
+        args.push_back(args_str.substr(last, next - last));
+        last = next + 1;
+    }
+    args.push_back(args_str.substr(last));
+    
+    if (args.size() != tmpl->type_params.size()) {
+        throw std::runtime_error("Template arg count mismatch for " + typeStr);
+    }
+    
+    std::vector<StructField> new_fields;
+    for (const auto& f : tmpl->fields) {
+        std::string new_type = f.type;
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (new_type == tmpl->type_params[i]) {
+                new_type = args[i];
+            }
+        }
+        new_fields.push_back({new_type, f.name});
+    }
+    
+    auto new_struct = std::make_unique<StructDefNode>(typeStr, std::vector<std::string>(), new_fields);
+    
+    StructInfo info;
+    info.name = typeStr;
+    info.fields = new_fields;
+    struct_table[typeStr] = info;
+    
+    current_ast->declarations.push_back(std::move(new_struct));
+}
+
 DataType SemanticAnalyzer::parseDataType(const std::string& typeStr) {
+    instantiateTemplateIfNeeded(typeStr);
     std::string base = typeStr;
     bool isPointer = false;
     while (!base.empty() && (base.back() == '*' || base.back() == ']')) {
@@ -23,18 +122,22 @@ DataType SemanticAnalyzer::parseDataType(const std::string& typeStr) {
     if (base == "byte") return DataType::BYTE;
     if (base == "bool") return DataType::BOOL;
     if (base == "float") return DataType::FLOAT;
+    if (base == "double") return DataType::DOUBLE;
     if (base == "void") return DataType::VOID;
     return DataType::UNKNOWN;
 }
+
+// --- Expression Type Checking ---
 
 DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
     if (auto literal = dynamic_cast<LiteralNode*>(expr)) {
         if (literal->type == DataType::UNKNOWN) {
             // It's a variable reference
-            if (symbol_table.find(literal->value) == symbol_table.end()) {
+            DataType t;
+            if (!lookupSymbol(literal->value, t)) {
                 throw std::runtime_error("Semantic Error: Undefined variable '" + literal->value + "'");
             }
-            return symbol_table[literal->value];
+            return t;
         }
         return literal->type;
     }
@@ -71,12 +174,16 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
     else if (auto methodCall = dynamic_cast<MethodCallNode*>(expr)) {
         std::string typeName = "";
         if (auto obj = dynamic_cast<VarAccessNode*>(methodCall->object.get())) {
-            if (struct_var_table.find(obj->name) != struct_var_table.end()) {
-                typeName = struct_var_table[obj->name];
-            } else if (symbol_table[obj->name] == DataType::POINTER && pointer_var_table.find(obj->name) != pointer_var_table.end()) {
-                std::string base = pointer_var_table[obj->name];
-                if (!base.empty() && base.back() == '*') base.pop_back();
-                typeName = base;
+            std::string sn;
+            if (lookupStructVar(obj->name, sn)) {
+                typeName = sn;
+            } else {
+                DataType dt;
+                if (lookupSymbol(obj->name, dt) && dt == DataType::POINTER && pointer_var_table.find(obj->name) != pointer_var_table.end()) {
+                    std::string base = pointer_var_table[obj->name];
+                    if (!base.empty() && base.back() == '*') base.pop_back();
+                    typeName = base;
+                }
             }
         }
         if (typeName.empty()) {
@@ -105,7 +212,11 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
                                 ((leftType == DataType::STRING && rightType == DataType::INT) ||
                                  (leftType == DataType::POINTER && rightType == DataType::INT));
             bool is_float_int = (leftType == DataType::FLOAT && rightType == DataType::INT) ||
-                                (leftType == DataType::INT && rightType == DataType::FLOAT);
+                                (leftType == DataType::INT && rightType == DataType::FLOAT) ||
+                                (leftType == DataType::DOUBLE && rightType == DataType::INT) ||
+                                (leftType == DataType::INT && rightType == DataType::DOUBLE) ||
+                                (leftType == DataType::FLOAT && rightType == DataType::DOUBLE) ||
+                                (leftType == DataType::DOUBLE && rightType == DataType::FLOAT);
             if (!is_ptr_arith && !is_float_int) {
                 std::cerr << "[DEBUG] BinOp Type Mismatch: " << binop->op << " on " << DataTypeToString(leftType) << " and " << DataTypeToString(rightType) << "\n";
                 binop->print(0);
@@ -126,10 +237,10 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         return leftType != DataType::UNKNOWN ? leftType : rightType;
     }
     else if (auto memberAccess = dynamic_cast<MemberAccessNode*>(expr)) {
-        if (struct_var_table.find(memberAccess->objectName) == struct_var_table.end()) {
+        std::string structName;
+        if (!lookupStructVar(memberAccess->objectName, structName)) {
             throw std::runtime_error("Semantic Error: Variable '" + memberAccess->objectName + "' is not a struct.");
         }
-        std::string structName = struct_var_table[memberAccess->objectName];
         StructInfo& info = struct_table[structName];
         
         bool found = false;
@@ -147,9 +258,12 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         return fieldType;
     }
     else if (auto varAccess = dynamic_cast<VarAccessNode*>(expr)) {
-        if (symbol_table.find(varAccess->name) != symbol_table.end()) {
-            return symbol_table[varAccess->name];
-        } else if (struct_var_table.find(varAccess->name) != struct_var_table.end()) {
+        DataType t;
+        if (lookupSymbol(varAccess->name, t)) {
+            return t;
+        }
+        std::string sn;
+        if (lookupStructVar(varAccess->name, sn)) {
             return DataType::UNKNOWN; // Custom struct
         }
         throw std::runtime_error("Semantic Error: Undefined variable '" + varAccess->name + "'");
@@ -191,11 +305,13 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         if (auto varNode = dynamic_cast<VarAccessNode*>(arrIndex->arrayExpr.get())) {
             fullType = array_var_table[varNode->name];
             if (fullType == "") fullType = pointer_var_table[varNode->name];
-            if (fullType == "") fullType = (symbol_table[varNode->name] == DataType::STRING) ? "string" : "";
+            DataType dt;
+            if (fullType == "" && lookupSymbol(varNode->name, dt) && dt == DataType::STRING) fullType = "string";
         }
         
         if (fullType == "int[]" || fullType == "int*" || fullType == "int") return DataType::INT;
         if (fullType == "float[]" || fullType == "float*" || fullType == "float") return DataType::FLOAT;
+        if (fullType == "double[]" || fullType == "double*" || fullType == "double") return DataType::DOUBLE;
         if (fullType == "byte[]" || fullType == "byte*" || fullType == "string") return DataType::BYTE;
         if (fullType == "string[]" || fullType == "string*") return DataType::STRING;
         return DataType::INT;
@@ -203,11 +319,13 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
     return DataType::UNKNOWN;
 }
 
+// --- Variable Declaration Checking ---
+
 void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     DataType expectedType = parseDataType(decl->varType);
     
     if (expectedType == DataType::UNKNOWN && struct_table.find(decl->varType) != struct_table.end()) {
-        struct_var_table[decl->name] = decl->varType;
+        declareStructVar(decl->name, decl->varType);
     } else if (expectedType == DataType::POINTER) {
         pointer_var_table[decl->name] = decl->varType;
         std::string base = decl->varType;
@@ -222,16 +340,17 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
             }
         }
         if (struct_table.find(base) != struct_table.end()) {
-            struct_var_table[decl->name] = base;
+            declareStructVar(decl->name, base);
         }
     }
     
-    if (expectedType == DataType::UNKNOWN && struct_var_table.find(decl->name) == struct_var_table.end()) {
+    std::string sn;
+    if (expectedType == DataType::UNKNOWN && !lookupStructVar(decl->name, sn)) {
         throw std::runtime_error("Semantic Error: Unknown variable type '" + decl->varType + "'");
     }
     
-    // Check if variable is already defined
-    if (symbol_table.find(decl->name) != symbol_table.end()) {
+    // Check if variable is already defined IN THE CURRENT SCOPE ONLY
+    if (isDeclaredInCurrentScope(decl->name)) {
         throw std::runtime_error("Semantic Error: Variable '" + decl->name + "' already declared in this scope.");
     }
     
@@ -242,40 +361,51 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
             if (!((expectedType == DataType::INT && actualType == DataType::BYTE) || 
                   (expectedType == DataType::BYTE && actualType == DataType::INT) ||
                   (expectedType == DataType::INT && actualType == DataType::FLOAT) ||
-                  (expectedType == DataType::FLOAT && actualType == DataType::INT))) {
+                  (expectedType == DataType::FLOAT && actualType == DataType::INT) ||
+                  (expectedType == DataType::INT && actualType == DataType::DOUBLE) ||
+                  (expectedType == DataType::DOUBLE && actualType == DataType::INT) ||
+                  (expectedType == DataType::FLOAT && actualType == DataType::DOUBLE) ||
+                  (expectedType == DataType::DOUBLE && actualType == DataType::FLOAT))) {
                 throw std::runtime_error("Semantic Error: Type mismatch in variable declaration '" + decl->name + "'. Expected " + DataTypeToString(expectedType) + " but got " + DataTypeToString(actualType));
             }
         }
     }
     
-    // Store in symbol table
-    symbol_table[decl->name] = expectedType;
+    // Store in current scope
+    declareSymbol(decl->name, expectedType);
 }
+
+// --- Statement Checking ---
 
 void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
     if (auto vardecl = dynamic_cast<VarDeclNode*>(stmt)) {
         checkVarDecl(vardecl);
     }
     else if (auto varassign = dynamic_cast<VarAssignNode*>(stmt)) {
-        if (symbol_table.find(varassign->name) == symbol_table.end()) {
-            throw std::runtime_error("Semantic Error: Assignment to undefined variable '" + varassign->name + "'");
+        DataType targetType;
+        if (!lookupSymbol(varassign->name, targetType)) {
+            std::cerr << "[COMPILER ERROR] Semantic Error: Assignment to undefined variable '" << varassign->name << "'" << std::endl;
+            exit(1);
         }
         DataType exprType = checkExpression(varassign->expr.get());
-        DataType targetType = symbol_table[varassign->name];
         if (exprType != targetType) {
             if (!((exprType == DataType::INT && targetType == DataType::BYTE) || 
                   (exprType == DataType::BYTE && targetType == DataType::INT) ||
                   (exprType == DataType::INT && targetType == DataType::FLOAT) ||
-                  (exprType == DataType::FLOAT && targetType == DataType::INT))) {
+                  (exprType == DataType::FLOAT && targetType == DataType::INT) ||
+                  (exprType == DataType::INT && targetType == DataType::DOUBLE) ||
+                  (exprType == DataType::DOUBLE && targetType == DataType::INT) ||
+                  (exprType == DataType::FLOAT && targetType == DataType::DOUBLE) ||
+                  (exprType == DataType::DOUBLE && targetType == DataType::FLOAT))) {
                 throw std::runtime_error("Semantic Error: Type mismatch in assignment to '" + varassign->name + "'");
             }
         }
     }
     else if (auto memberAssign = dynamic_cast<MemberAssignNode*>(stmt)) {
-        if (struct_var_table.find(memberAssign->objectName) == struct_var_table.end()) {
+        std::string structName;
+        if (!lookupStructVar(memberAssign->objectName, structName)) {
             throw std::runtime_error("Semantic Error: Variable '" + memberAssign->objectName + "' is not a struct.");
         }
-        std::string structName = struct_var_table[memberAssign->objectName];
         StructInfo& info = struct_table[structName];
         
         bool found = false;
@@ -299,7 +429,7 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
     else if (auto arrDecl = dynamic_cast<ArrayDeclNode*>(stmt)) {
         DataType expectedType = parseDataType(arrDecl->type);
         array_var_table[arrDecl->name] = arrDecl->type;
-        symbol_table[arrDecl->name] = DataType::ARRAY;
+        declareSymbol(arrDecl->name, DataType::ARRAY);
         
         DataType sizeType = checkExpression(arrDecl->sizeExpr.get());
         if (sizeType != DataType::INT) {
@@ -308,8 +438,11 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
     }
     else if (auto arrAssign = dynamic_cast<ArrayAssignNode*>(stmt)) {
         if (auto varNode = dynamic_cast<VarAccessNode*>(arrAssign->arrayExpr.get())) {
-            if (array_var_table.find(varNode->name) == array_var_table.end() && pointer_var_table.find(varNode->name) == pointer_var_table.end() && symbol_table[varNode->name] != DataType::STRING) {
-                // Warning or nothing
+            if (array_var_table.find(varNode->name) == array_var_table.end() && pointer_var_table.find(varNode->name) == pointer_var_table.end()) {
+                DataType dt;
+                if (!lookupSymbol(varNode->name, dt) || dt != DataType::STRING) {
+                    // Warning or nothing
+                }
             }
         }
         DataType idxType = checkExpression(arrAssign->indexExpr.get());
@@ -335,15 +468,51 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         if (condType != DataType::BOOL) {
             throw std::runtime_error("Semantic Error: 'if' condition must evaluate to a boolean.");
         }
+        // Scoped then-body
+        pushScope();
         for (const auto& s : ifNode->then_body) checkStatement(s.get());
-        for (const auto& s : ifNode->else_body) checkStatement(s.get());
+        popScope();
+        // Scoped else-body
+        if (!ifNode->else_body.empty()) {
+            pushScope();
+            for (const auto& s : ifNode->else_body) checkStatement(s.get());
+            popScope();
+        }
     }
     else if (auto whileNode = dynamic_cast<WhileNode*>(stmt)) {
         DataType condType = checkExpression(whileNode->condition.get());
         if (condType != DataType::BOOL) {
             throw std::runtime_error("Semantic Error: 'while' condition must evaluate to a boolean.");
         }
+        // Scoped body
+        pushScope();
         for (const auto& s : whileNode->body) checkStatement(s.get());
+        popScope();
+    }
+    else if (auto forNode = dynamic_cast<ForNode*>(stmt)) {
+        // The entire for-loop gets its own scope (so init var like 'int i' is scoped)
+        pushScope();
+        
+        // Check init
+        if (forNode->init) checkStatement(forNode->init.get());
+        
+        // Check condition (must be bool)
+        if (forNode->condition) {
+            DataType condType = checkExpression(forNode->condition.get());
+            if (condType != DataType::BOOL) {
+                throw std::runtime_error("Semantic Error: 'for' condition must evaluate to a boolean.");
+            }
+        }
+        
+        // Check body (inner scope for body-local vars)
+        pushScope();
+        for (const auto& s : forNode->body) checkStatement(s.get());
+        popScope();
+        
+        // Check update
+        if (forNode->update) checkStatement(forNode->update.get());
+        
+        popScope();
     }
     else if (auto returnNode = dynamic_cast<ReturnNode*>(stmt)) {
         DataType returnType = DataType::VOID;
@@ -353,6 +522,10 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         if (returnType != current_routine_return_type && 
             !((returnType == DataType::INT && current_routine_return_type == DataType::FLOAT) ||
               (returnType == DataType::FLOAT && current_routine_return_type == DataType::INT) ||
+              (returnType == DataType::INT && current_routine_return_type == DataType::DOUBLE) ||
+              (returnType == DataType::DOUBLE && current_routine_return_type == DataType::INT) ||
+              (returnType == DataType::FLOAT && current_routine_return_type == DataType::DOUBLE) ||
+              (returnType == DataType::DOUBLE && current_routine_return_type == DataType::FLOAT) ||
               (returnType == DataType::INT && current_routine_return_type == DataType::BYTE) ||
               (returnType == DataType::BYTE && current_routine_return_type == DataType::INT))) {
             throw std::runtime_error("Semantic Error: Return type mismatch. Expected " + 
@@ -371,21 +544,66 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
             checkStatement(s.get());
         }
     }
+    else if (auto throwNode = dynamic_cast<ThrowNode*>(stmt)) {
+        DataType type = checkExpression(throwNode->expr.get());
+        if (type != DataType::STRING) {
+            throw std::runtime_error("Semantic Error: Can only throw string types.");
+        }
+    }
+    else if (auto tryNode = dynamic_cast<TryCatchNode*>(stmt)) {
+        pushScope();
+        for (const auto& s : tryNode->try_body) checkStatement(s.get());
+        popScope();
+        
+        pushScope();
+        DataType catchType = parseDataType(tryNode->catch_var_type);
+        declareSymbol(tryNode->catch_var_name, catchType);
+        for (const auto& s : tryNode->catch_body) checkStatement(s.get());
+        popScope();
+    }
+    else if (auto handleNode = dynamic_cast<HandleNode*>(stmt)) {
+        // Evaluate the 'in' call
+        if (handleNode->in_call) {
+            checkExpression(handleNode->in_call.get());
+        }
+        
+        // Evaluate the 'on' block with scoped variables
+        pushScope();
+        for (const auto& arg : handleNode->handler_args) {
+            declareSymbol(arg.second, DataType::STRING); // hardcode string for simplicity
+        }
+        for (const auto& s : handleNode->handler_body) {
+            checkStatement(s.get());
+        }
+        popScope();
+    }
+    else if (auto yieldNode = dynamic_cast<YieldNode*>(stmt)) {
+        for (const auto& arg : yieldNode->args) {
+            checkExpression(arg.get());
+        }
+    }
+    else if (auto resumeNode = dynamic_cast<ResumeNode*>(stmt)) {
+        if (resumeNode->expr) {
+            checkExpression(resumeNode->expr.get());
+        }
+    }
     // AsmCall is unchecked for now (by definition it's unsafe)
 }
 
+// --- Routine Checking ---
+
 void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
-    // In a real compiler, we'd push a new scope onto a scope stack here.
-    // We clear symbol table per routine for this prototype to act as local scope.
-    symbol_table.clear();
-    struct_var_table.clear();
+    // Clear scope stack and push a fresh function-level scope
+    scope_stack.clear();
+    struct_var_stack.clear();
+    pushScope();
     
     // Register parameters as local variables
     for (const auto& param : routine->params) {
         DataType pt = parseDataType(param.type);
-        symbol_table[param.name] = pt;
+        declareSymbol(param.name, pt);
         if (pt == DataType::UNKNOWN && struct_table.find(param.type) != struct_table.end()) {
-            struct_var_table[param.name] = param.type;
+            declareStructVar(param.name, param.type);
         } else if (pt == DataType::POINTER) {
             pointer_var_table[param.name] = param.type;
             std::string base = param.type;
@@ -400,7 +618,7 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
                 }
             }
             if (struct_table.find(base) != struct_table.end()) {
-                struct_var_table[param.name] = base;
+                declareStructVar(param.name, base);
             }
         }
     }
@@ -410,12 +628,17 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
     for (const auto& stmt : routine->body) {
         checkStatement(stmt.get());
     }
+    
+    popScope();
 }
 
+// --- Program Checking ---
+
 void SemanticAnalyzer::checkProgram(ProgramNode* node) {
-    // First pass: Register all routines
-    for (const auto& decl : node->declarations) {
-        if (auto routine = dynamic_cast<RoutineNode*>(decl.get())) {
+    // First pass: Register structs and routines
+    for (size_t i = 0; i < node->declarations.size(); ++i) {
+        auto* decl = node->declarations[i].get();
+        if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
             FunctionSignature sig;
             sig.returnType = parseDataType(routine->returnType);
             for (const auto& p : routine->params) {
@@ -424,7 +647,7 @@ void SemanticAnalyzer::checkProgram(ProgramNode* node) {
             }
             sig.isVariadic = false;
             function_table[routine->name] = sig;
-        } else if (auto ext = dynamic_cast<ExternRoutineNode*>(decl.get())) {
+        } else if (auto ext = dynamic_cast<ExternRoutineNode*>(decl)) {
             FunctionSignature sig;
             sig.returnType = parseDataType(ext->returnType);
             for (const auto& p : ext->params) {
@@ -433,17 +656,24 @@ void SemanticAnalyzer::checkProgram(ProgramNode* node) {
             }
             sig.isVariadic = ext->isVariadic;
             function_table[ext->name] = sig;
-        } else if (auto structDef = dynamic_cast<StructDefNode*>(decl.get())) {
-            StructInfo info;
-            info.name = structDef->name;
-            info.fields = structDef->fields;
-            struct_table[structDef->name] = info;
+        } else if (auto structDef = dynamic_cast<StructDefNode*>(decl)) {
+            if (!structDef->type_params.empty()) {
+                struct_templates[structDef->name] = structDef;
+            } else {
+                StructInfo info;
+                info.name = structDef->name;
+                info.fields = structDef->fields;
+                struct_table[structDef->name] = info;
+            }
+        } else if (auto effectDef = dynamic_cast<EffectDeclNode*>(decl)) {
+            // For now, no strict type tracking for effects globally, just pass it through
         }
     }
     
     // Second pass: Check routine bodies
-    for (const auto& decl : node->declarations) {
-        if (auto routine = dynamic_cast<RoutineNode*>(decl.get())) {
+    for (size_t i = 0; i < node->declarations.size(); ++i) {
+        auto* decl = node->declarations[i].get();
+        if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
             checkRoutine(routine);
         }
     }
@@ -451,6 +681,7 @@ void SemanticAnalyzer::checkProgram(ProgramNode* node) {
 
 void SemanticAnalyzer::analyze(ProgramNode* ast) {
     std::cout << "[ALU CXX] Running Semantic Analysis..." << std::endl;
+    current_ast = ast;
     checkProgram(ast);
     std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
 }

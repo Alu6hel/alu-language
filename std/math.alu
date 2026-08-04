@@ -1,16 +1,65 @@
-// ST-04: std::math - Core Mathematics
+// ALU Native Standard Library: math
+// Native Integer Math operations
 
-routine abs(x) {
-    // Branchless absolute value
+// Standard ALU helpers
+routine abs(int x) -> int {
     unsafe {
-        reg mask = x >> 63
-        return (x ^ mask) - mask
+        asm("; abs inline");
     }
+    // simple fallback
+    if (x < 0) {
+        return 0 - x;
+    }
+    return x;
 }
 
-routine max(a, b) {
-    unsafe {
-        // Reuse swar_conditional from magic.alu
-        return swar_conditional(a, b, a, b)
+routine max(int a, int b) -> int {
+    if (a > b) {
+        return a;
     }
+    return b;
+}
+
+routine min(int a, int b) -> int {
+    if (a < b) {
+        return a;
+    }
+    return b;
+}
+
+routine atoi(string s) -> int {
+    int res = 0;
+    int i = 0;
+    int sign = 1;
+    int c = int(s[0]) & 255;
+    if (c == 45) { // '-'
+        sign = 0 - 1;
+        i = 1;
+    }
+    
+    int done = 0;
+    while (done == 0) {
+        c = int(s[i]) & 255;
+        if (c == 0) {
+            done = 1;
+        } else {
+            if (c >= 48) {
+                if (c <= 57) {
+                    res = (res * 10) + (c - 48);
+                } else {
+                    done = 1;
+                }
+            } else {
+                done = 1;
+            }
+        }
+        if (done == 0) {
+            i = i + 1;
+        }
+    }
+    
+    if (sign < 0) {
+        return 0 - res;
+    }
+    return res;
 }

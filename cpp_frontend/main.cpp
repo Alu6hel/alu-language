@@ -2,9 +2,13 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <memory>
+#include <unordered_set>
+#include <vector>
 #include "lexer.h"
 #include "parser.h"
 #include "semantic_analyzer.h"
+#include "z3_verifier.h"
 #include "llvm_codegen.h"
 
 int main(int argc, char* argv[]) {
@@ -13,7 +17,109 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string filename = argv[1];
+    std::string command = "build";
+    std::string target = "";
+    std::string targetTriple = "";
+    bool createXcframework = false;
+    std::string ndkPath = "";
+    std::string jniPackage = "com.example.alu";
+    
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.find("--target=") == 0) {
+            targetTriple = arg.substr(9);
+        } else if (arg == "--create-xcframework") {
+            createXcframework = true;
+        } else if (arg == "--ndk-path" && i + 1 < argc) {
+            ndkPath = argv[++i];
+        } else if (arg == "--package" && i + 1 < argc) {
+            jniPackage = argv[++i];
+        } else if (i == 1 && (arg == "install" || arg == "build")) {
+            command = arg;
+        } else {
+            target = arg;
+        }
+    }
+
+    bool targetAndroid = (targetTriple == "aarch64-linux-android");
+    bool targetWasm = (targetTriple == "wasm32-unknown-emscripten");
+    bool targetVulkan = (targetTriple == "spirv64-unknown-unknown");
+    bool targetMetal = (targetTriple == "air64-apple-macos");
+    bool targetIos = (targetTriple == "aarch64-apple-ios");
+    bool targetIosSim = (targetTriple == "x86_64-apple-ios-simulator" || targetTriple == "aarch64-apple-ios-simulator");
+
+    // XCFramework logic
+    if (createXcframework) {
+        if (target.empty()) {
+            std::cerr << "Usage: alu_cxx build <file.alu> --create-xcframework" << std::endl;
+            return 1;
+        }
+        std::string baseFilename = target.substr(0, target.find_last_of("."));
+        std::cout << "[ALU CXX] Creating XCFramework for " << baseFilename << "..." << std::endl;
+        
+        std::string exeName = argv[0];
+        
+        // 1. Build for iOS ARM64
+        std::string cmdIos = exeName + " build " + target + " --target=aarch64-apple-ios";
+        std::cout << "[ALU CXX] Executing: " << cmdIos << std::endl;
+        if (std::system(cmdIos.c_str()) != 0) return 1;
+        
+        // 2. Build for iOS Simulator x86_64
+        std::string cmdSimX86 = exeName + " build " + target + " --target=x86_64-apple-ios-simulator";
+        std::cout << "[ALU CXX] Executing: " << cmdSimX86 << std::endl;
+        if (std::system(cmdSimX86.c_str()) != 0) return 1;
+        
+        // 3. Build for iOS Simulator arm64
+        std::string cmdSimArm = exeName + " build " + target + " --target=aarch64-apple-ios-simulator";
+        std::cout << "[ALU CXX] Executing: " << cmdSimArm << std::endl;
+        if (std::system(cmdSimArm.c_str()) != 0) return 1;
+        
+        // Combine simulator archs
+        std::string cmdLipo = "lipo -create -output lib" + baseFilename + "-sim.a " + baseFilename + "-x86_64-apple-ios-simulator.a " + baseFilename + "-aarch64-apple-ios-simulator.a";
+        std::system(cmdLipo.c_str());
+        
+        // Create xcframework
+        std::string cmdRm = "rm -rf " + baseFilename + ".xcframework";
+        std::system(cmdRm.c_str());
+        
+        std::string cmdXc = "xcodebuild -create-xcframework -library " + baseFilename + "-aarch64-apple-ios.a -library lib" + baseFilename + "-sim.a -output " + baseFilename + ".xcframework";
+        int res = std::system(cmdXc.c_str());
+        
+        if (res == 0) {
+            std::cout << "[ALU CXX] Successfully built " << baseFilename << ".xcframework!" << std::endl;
+        }
+        return res;
+    }
+
+    if (command == "install") {
+        if (target.empty()) {
+            std::cerr << "Usage: alu_cxx install <user/repo>" << std::endl;
+            return 1;
+        }
+        std::string url = "https://github.com/" + target;
+        std::string repo_name = target;
+        size_t slash_pos = target.find('/');
+        if (slash_pos != std::string::npos) {
+            repo_name = target.substr(slash_pos + 1);
+        }
+        std::string cmd = "git clone " + url + " alu_modules/" + repo_name;
+        std::cout << "[ALU CXX] Installing package: " << target << "..." << std::endl;
+        int res = system(cmd.c_str());
+        if (res == 0) {
+            std::cout << "[ALU CXX] Package installed successfully to alu_modules/" << repo_name << std::endl;
+        } else {
+            std::cerr << "[ALU CXX] Failed to install package." << std::endl;
+            return 1;
+        }
+        return 0;
+    }
+
+    std::string filename = target;
+    if (filename.empty()) {
+        std::cerr << "Error: No input file specified." << std::endl;
+        return 1;
+    }
+
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Error: Could not open file " << filename << std::endl;
@@ -35,6 +141,56 @@ int main(int argc, char* argv[]) {
     Parser parser(tokens);
     try {
         std::unique_ptr<ProgramNode> ast = parser.parse();
+        
+        // Resolve imports
+        bool hasImports = true;
+        std::unordered_set<std::string> imported_files;
+        while (hasImports) {
+            hasImports = false;
+            for (auto it = ast->declarations.begin(); it != ast->declarations.end(); ++it) {
+                if (auto importNode = dynamic_cast<ImportNode*>(it->get())) {
+                    std::string modFile = importNode->moduleName;
+                    
+                    // Remove ImportNode from AST
+                    ast->declarations.erase(it); 
+                    
+                    if (imported_files.find(modFile) != imported_files.end()) {
+                        hasImports = true;
+                        break;
+                    }
+                    imported_files.insert(modFile);
+                    
+                    // Parse imported file
+                    std::ifstream mf(modFile);
+                    if (!mf.is_open()) {
+                        // Try inside alu_modules
+                        std::string modulePath = "alu_modules/" + modFile;
+                        mf.open(modulePath);
+                        if (!mf.is_open()) {
+                            // Try alu_modules/pkg/pkg.alu
+                            modulePath = "alu_modules/" + modFile + "/" + modFile + ".alu";
+                            mf.open(modulePath);
+                            if (!mf.is_open()) {
+                                throw std::runtime_error("Cannot open imported file: " + modFile);
+                            }
+                        }
+                    }
+                    std::cout << "[DEBUG] Parsing imported file: " << modFile << std::endl;
+                    std::stringstream mb; mb << mf.rdbuf();
+                    Lexer ml(mb.str());
+                    Parser mp(ml.tokenize());
+                    auto mAst = mp.parse();
+                    
+                    // Insert all declarations from mAst into ast
+                    for (auto& decl : mAst->declarations) {
+                        ast->declarations.push_back(std::move(decl));
+                    }
+                    hasImports = true;
+                    break; // iterator invalidated
+                }
+            }
+        }
+        
         std::cout << "[ALU CXX] Abstract Syntax Tree generated successfully:" << std::endl;
         std::cout << "==================================================" << std::endl;
         ast->print();
@@ -43,9 +199,17 @@ int main(int argc, char* argv[]) {
         SemanticAnalyzer semanticAnalyzer;
         semanticAnalyzer.analyze(ast.get());
         
+        Z3Verifier z3Verifier;
+        z3Verifier.verify(ast.get());
+        
         std::cout << "[ALU CXX] Ready for LLVM IR Translation." << std::endl;
         
-        LLVMCodeGen codegen;
+        std::string targetArchStr = "x86_64";
+        if (targetWasm) targetArchStr = "wasm";
+        if (targetVulkan) targetArchStr = "vulkan";
+        if (targetMetal) targetArchStr = "metal";
+        
+        LLVMCodeGen codegen(targetArchStr);
         ast->codegen(codegen);
         
         std::string outFilename = filename + ".ll";
@@ -56,18 +220,149 @@ int main(int argc, char* argv[]) {
         std::cout << "==================================================" << std::endl;
         std::cout << "[ALU CXX] Successfully wrote IR to " << outFilename << std::endl;
         
+        // --- JNI BRIDGE GENERATION PHASE --- //
+        if (targetAndroid) {
+            std::cout << "[ALU CXX] Generating JNI Bridge for package: " << jniPackage << std::endl;
+            std::ofstream jniFile("jni_bridge.cpp");
+            jniFile << "#include <jni.h>\n";
+            jniFile << "#include <string>\n";
+            jniFile << "#include <vector>\n";
+            jniFile << "#include <iostream>\n\n";
+            jniFile << "extern \"C\" {\n";
+            for (const auto& decl : ast->declarations) {
+                if (auto rNode = dynamic_cast<RoutineNode*>(decl.get())) {
+                    if (rNode->isExported) {
+                        // Declare the ALU function extern so C++ can link to it
+                        jniFile << "    extern int " << rNode->name << "(";
+                        for (size_t i = 0; i < rNode->params.size(); ++i) {
+                            if (rNode->params[i].type == "string" && rNode->params[i].name.find("buffer") != std::string::npos) {
+                                jniFile << "char*";
+                            } else if (rNode->params[i].type == "string" || rNode->params[i].type == "byte*" || rNode->params[i].type == "buffer") {
+                                jniFile << "char*";
+                            } else {
+                                jniFile << "int";
+                            }
+                            if (i < rNode->params.size() - 1) jniFile << ", ";
+                        }
+                        jniFile << ");\n";
+                    }
+                }
+            }
+            jniFile << "}\n\n";
+            
+            std::string pkgUnderscore = jniPackage;
+            for (char& c : pkgUnderscore) if (c == '.') c = '_';
+            
+            for (const auto& decl : ast->declarations) {
+                if (auto rNode = dynamic_cast<RoutineNode*>(decl.get())) {
+                    if (rNode->isExported) {
+                        jniFile << "extern \"C\" JNIEXPORT jint JNICALL\n";
+                        jniFile << "Java_" << pkgUnderscore << "_AluBridge_" << rNode->name << "(JNIEnv *env, jobject thiz";
+                        for (size_t i = 0; i < rNode->params.size(); ++i) {
+                            jniFile << ", ";
+                            if (rNode->params[i].type == "string" && rNode->params[i].name.find("buffer") != std::string::npos) {
+                                jniFile << "jobject " << rNode->params[i].name;
+                            } else if (rNode->params[i].type == "string") {
+                                jniFile << "jstring " << rNode->params[i].name;
+                            } else if (rNode->params[i].type == "byte*" || rNode->params[i].type == "buffer") {
+                                jniFile << "jobject " << rNode->params[i].name;
+                            } else {
+                                jniFile << "jint " << rNode->params[i].name;
+                            }
+                        }
+                        jniFile << ") {\n";
+                        
+                        // Extract strings and arrays
+                        std::vector<std::string> stringVars;
+                        std::vector<std::string> arrayVars;
+                        for (const auto& p : rNode->params) {
+                            if (p.type == "string" && p.name.find("buffer") != std::string::npos) {
+                                jniFile << "    void* c_" << p.name << " = env->GetDirectBufferAddress(" << p.name << ");\n";
+                            } else if (p.type == "string") {
+                                jniFile << "    const char* c_" << p.name << " = env->GetStringUTFChars(" << p.name << ", 0);\n";
+                                stringVars.push_back(p.name);
+                            } else if (p.type == "byte*" || p.type == "buffer") {
+                                jniFile << "    void* c_" << p.name << " = env->GetDirectBufferAddress(" << p.name << ");\n";
+                                // No release needed for direct buffer addresses
+                            }
+                        }
+                        
+                        jniFile << "    int result = " << rNode->name << "(";
+                        for (size_t i = 0; i < rNode->params.size(); ++i) {
+                            if (rNode->params[i].type == "string" || rNode->params[i].type == "byte*" || rNode->params[i].type == "buffer") {
+                                jniFile << "(char*)c_" << rNode->params[i].name;
+                            } else {
+                                jniFile << rNode->params[i].name;
+                            }
+                            if (i < rNode->params.size() - 1) jniFile << ", ";
+                        }
+                        jniFile << ");\n";
+                        
+                        // Release strings
+                        for (const auto& s : stringVars) {
+                            jniFile << "    env->ReleaseStringUTFChars(" << s << ", c_" << s << ");\n";
+                        }
+                        
+                        jniFile << "    return result;\n";
+                        jniFile << "}\n\n";
+                    }
+                }
+            }
+            jniFile.close();
+            std::cout << "[ALU CXX] JNI Bridge generated at jni_bridge.cpp" << std::endl;
+        }
+
         // --- BACKEND LINKER PHASE --- //
         std::cout << "[ALU CXX] Invoking LLVM Backend (clang) to assemble and link..." << std::endl;
         
-        // Strip the .alu extension and add .exe
+        // Strip the .alu extension and add .exe, .so, or .js
         std::string baseFilename = filename.substr(0, filename.find_last_of("."));
-        std::string exeFilename = baseFilename + ".exe";
+        std::string outBinFilename = baseFilename;
         
-        std::string compileCommand = "clang -O3 -o " + exeFilename + " " + outFilename;
+        if (targetAndroid) outBinFilename += ".so";
+        else if (targetWasm) outBinFilename += ".js";
+        else if (targetVulkan) outBinFilename += ".spv";
+        else if (targetMetal) outBinFilename += ".metallib";
+        else if (targetIos || targetIosSim) outBinFilename += "-" + targetTriple + ".a";
+        else outBinFilename += ".exe";
+        
+        std::string compileCommand;
+        if (targetWasm) {
+            compileCommand = "emcc -O3 -s WASM=1 -s EXPORTED_FUNCTIONS=\"['_process_image', '_apply_filter']\" -o " + outBinFilename + " " + outFilename + " std/image_backend.cpp std/yara_backend.cpp";
+        } else if (targetAndroid) {
+            std::string resolvedNdk = ndkPath;
+            if (resolvedNdk.empty()) {
+                const char* envNdk = std::getenv("ANDROID_NDK_HOME");
+                if (envNdk) {
+                    resolvedNdk = envNdk;
+                } else {
+                    const char* localAppdata = std::getenv("LOCALAPPDATA");
+                    if (localAppdata) {
+                        resolvedNdk = std::string(localAppdata) + "\\Android\\Sdk\\ndk\\25.1.8937393"; // Default fallback
+                    }
+                }
+            }
+            std::string clangPath = resolvedNdk + "\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\aarch64-linux-android30-clang++";
+            compileCommand = clangPath + " -shared -fPIC -o " + outBinFilename + " " + outFilename + " jni_bridge.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp -lcrypto -lssl";
+        } else if (targetVulkan) {
+            compileCommand = "llvm-spirv -o " + outBinFilename + " " + outFilename;
+        } else if (targetMetal) {
+            compileCommand = "xcrun -sdk macosx metal -c " + outFilename + " -o " + baseFilename + ".air && xcrun -sdk macosx metallib " + baseFilename + ".air -o " + outBinFilename;
+        } else if (targetIos) {
+            std::string objFile = baseFilename + "-arm64.o";
+            compileCommand = "clang -x ir " + outFilename + " std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+        } else if (targetIosSim) {
+            std::string arch = (targetTriple == "aarch64-apple-ios-simulator") ? "arm64" : "x86_64";
+            std::string objFile = baseFilename + "-" + arch + "-sim.o";
+            compileCommand = "clang -x ir " + outFilename + " std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+        } else {
+            compileCommand = "clang++ -O3 -o " + outBinFilename + " " + outFilename + " ../std/fs_backend.cpp ../std/net_backend.cpp ../std/crypto_backend.cpp -lws2_32 -L../z3/bin -lz3";
+        }
+        
         int result = std::system(compileCommand.c_str());
         
         if (result == 0) {
-            std::cout << "[ALU CXX] Compilation Successful! Executable built at: " << exeFilename << std::endl;
+            std::cout << "[ALU CXX] Compilation Successful! Binary built at: " << outBinFilename << std::endl;
         } else {
             std::cerr << "[ALU CXX] Linker Error: Clang failed with exit code " << result << std::endl;
             return 1;

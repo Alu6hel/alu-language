@@ -11,7 +11,10 @@ enum class DataType {
     BOOL,
     VOID,
     POINTER,
-    ARRAY
+    ARRAY,
+    FLOAT,
+    DOUBLE,
+    BYTE
 };
 
 inline std::string DataTypeToString(DataType type) {
@@ -22,6 +25,9 @@ inline std::string DataTypeToString(DataType type) {
         case DataType::VOID: return "VOID";
         case DataType::POINTER: return "POINTER";
         case DataType::ARRAY: return "ARRAY";
+        case DataType::FLOAT: return "FLOAT";
+        case DataType::DOUBLE: return "DOUBLE";
+        case DataType::BYTE: return "BYTE";
         default: return "UNKNOWN";
     }
 }
@@ -103,6 +109,54 @@ public:
     void codegen(LLVMCodeGen& cg) override;
 };
 
+class ThrowNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> expr;
+    
+    ThrowNode(std::unique_ptr<ASTNode> e) : expr(std::move(e)) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Throw]\n";
+        expr->print(indent + 2);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+class TryCatchNode : public ASTNode {
+public:
+    std::vector<std::unique_ptr<ASTNode>> try_body;
+    std::string catch_var_type;
+    std::string catch_var_name;
+    std::vector<std::unique_ptr<ASTNode>> catch_body;
+    
+    TryCatchNode(std::vector<std::unique_ptr<ASTNode>> t_body,
+                 std::string c_type,
+                 std::string c_name,
+                 std::vector<std::unique_ptr<ASTNode>> c_body)
+        : try_body(std::move(t_body)), catch_var_type(c_type), catch_var_name(c_name), catch_body(std::move(c_body)) {}
+        
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Try]\n";
+        for (const auto& stmt : try_body) stmt->print(indent + 2);
+        std::cout << std::string(indent, ' ') << "[Catch] " << catch_var_type << " " << catch_var_name << "\n";
+        for (const auto& stmt : catch_body) stmt->print(indent + 2);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+class CastNode : public ASTNode {
+public:
+    DataType targetType;
+    std::unique_ptr<ASTNode> expr;
+    
+    CastNode(DataType t, std::unique_ptr<ASTNode> e) : targetType(t), expr(std::move(e)) {}
+    void print(int indent = 0) const override {
+        std::string ts = (targetType == DataType::INT) ? "int" : (targetType == DataType::FLOAT) ? "float" : "byte";
+        std::cout << std::string(indent, ' ') << "[Cast] to " << ts << "\n";
+        expr->print(indent + 2);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
 class FreeNode : public ASTNode {
 public:
     std::unique_ptr<ASTNode> expr;
@@ -162,6 +216,26 @@ public:
     void codegen(LLVMCodeGen& cg) override;
 };
 
+// For Node: for (init; cond; update) { body }
+class ForNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> init;
+    std::unique_ptr<ASTNode> condition;
+    std::unique_ptr<ASTNode> update;
+    std::vector<std::unique_ptr<ASTNode>> body;
+    ForNode(std::unique_ptr<ASTNode> i, std::unique_ptr<ASTNode> c, std::unique_ptr<ASTNode> u)
+        : init(std::move(i)), condition(std::move(c)), update(std::move(u)) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[For]" << std::endl;
+        if (init) { std::cout << std::string(indent + 2, ' ') << "[Init]" << std::endl; init->print(indent + 6); }
+        if (condition) { std::cout << std::string(indent + 2, ' ') << "[Cond]" << std::endl; condition->print(indent + 6); }
+        if (update) { std::cout << std::string(indent + 2, ' ') << "[Update]" << std::endl; update->print(indent + 6); }
+        std::cout << std::string(indent + 2, ' ') << "[Body]" << std::endl;
+        for (const auto& stmt : body) stmt->print(indent + 6);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
 // Return Node
 class ReturnNode : public ASTNode {
 public:
@@ -170,6 +244,65 @@ public:
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[Return]" << std::endl;
         if (expr) expr->print(indent + 4);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+// Effect Declaration Node
+class EffectDeclNode : public ASTNode {
+public:
+    std::string name;
+    std::vector<std::unique_ptr<ASTNode>> methods; // RoutineNode representing signatures
+    EffectDeclNode(std::string n) : name(n) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[EffectDef] " << name << std::endl;
+        for (const auto& m : methods) m->print(indent + 4);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+// Yield Node
+class YieldNode : public ASTNode {
+public:
+    std::string effect_name;
+    std::string method_name;
+    std::vector<std::unique_ptr<ASTNode>> args;
+    YieldNode(std::string en, std::string mn) : effect_name(en), method_name(mn) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Yield] " << effect_name << "." << method_name << std::endl;
+        for (const auto& a : args) a->print(indent + 4);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+// Resume Node
+class ResumeNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> expr;
+    ResumeNode(std::unique_ptr<ASTNode> e) : expr(std::move(e)) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Resume]" << std::endl;
+        if (expr) expr->print(indent + 4);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+// Handle Node
+class HandleNode : public ASTNode {
+public:
+    std::string effect_name;
+    std::string handler_method;
+    std::vector<std::pair<DataType, std::string>> handler_args;
+    std::vector<std::unique_ptr<ASTNode>> handler_body; // 'on' block
+    std::unique_ptr<ASTNode> in_call; // 'in' block function call
+    
+    HandleNode(std::string en) : effect_name(en) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Handle] " << effect_name << std::endl;
+        std::cout << std::string(indent + 2, ' ') << "[On] " << handler_method << std::endl;
+        for (const auto& stmt : handler_body) stmt->print(indent + 6);
+        std::cout << std::string(indent + 2, ' ') << "[In]" << std::endl;
+        if (in_call) in_call->print(indent + 6);
     }
     void codegen(LLVMCodeGen& cg) override;
 };
@@ -203,10 +336,19 @@ struct StructField {
 class StructDefNode : public ASTNode {
 public:
     std::string name;
+    std::vector<std::string> type_params;
     std::vector<StructField> fields;
-    StructDefNode(std::string n, std::vector<StructField> f) : name(n), fields(f) {}
+    StructDefNode(std::string n, std::vector<std::string> tp, std::vector<StructField> f) : name(n), type_params(tp), fields(f) {}
     void print(int indent = 0) const override {
-        std::cout << std::string(indent, ' ') << "[StructDef] " << name << std::endl;
+        std::cout << std::string(indent, ' ') << "[StructDef] " << name;
+        if (!type_params.empty()) {
+            std::cout << "<";
+            for (size_t i = 0; i < type_params.size(); ++i) {
+                std::cout << type_params[i] << (i + 1 < type_params.size() ? ", " : "");
+            }
+            std::cout << ">";
+        }
+        std::cout << std::endl;
         for (const auto& field : fields) {
             std::cout << std::string(indent + 4, ' ') << field.type << " " << field.name << std::endl;
         }
@@ -267,6 +409,12 @@ public:
     void codegen(LLVMCodeGen& cg) override;
 };
 
+struct Receiver {
+    std::string name;
+    std::string type;
+    bool isPointer;
+};
+
 // Routine Node: routine calculate(int x, int y) -> int { ... }
 class RoutineNode : public ASTNode {
 public:
@@ -274,9 +422,16 @@ public:
     std::vector<Parameter> params;
     std::string returnType;
     std::vector<std::unique_ptr<ASTNode>> body;
-    RoutineNode(std::string n) : name(n), returnType("void") {}
+    std::optional<Receiver> receiver;
+    bool isExported = false;
+
+    RoutineNode(std::string n, std::optional<Receiver> rec = std::nullopt, bool exported = false) : name(n), returnType("void"), receiver(rec), isExported(exported) {}
     void print(int indent = 0) const override {
-        std::cout << std::string(indent, ' ') << "[RoutineDef] " << name << "(";
+        std::cout << std::string(indent, ' ') << "[RoutineDef] ";
+        if (receiver) {
+            std::cout << "(" << receiver->name << ": " << receiver->type << (receiver->isPointer ? "*" : "") << ") ";
+        }
+        std::cout << name << "(";
         for (size_t i = 0; i < params.size(); ++i) {
             std::cout << params[i].type << " " << params[i].name;
             if (i < params.size() - 1) std::cout << ", ";
@@ -363,11 +518,13 @@ public:
 
 class ArrayIndexNode : public ASTNode {
 public:
-    std::string name;
+    std::unique_ptr<ASTNode> arrayExpr;
     std::unique_ptr<ASTNode> indexExpr;
-    ArrayIndexNode(std::string n, std::unique_ptr<ASTNode> idx) : name(n), indexExpr(std::move(idx)) {}
+    ArrayIndexNode(std::unique_ptr<ASTNode> arr, std::unique_ptr<ASTNode> idx) : arrayExpr(std::move(arr)), indexExpr(std::move(idx)) {}
     void print(int indent = 0) const override {
-        std::cout << std::string(indent, ' ') << "[ArrayIndex] " << name << "[" << std::endl;
+        std::cout << std::string(indent, ' ') << "[ArrayIndex]" << std::endl;
+        arrayExpr->print(indent + 4);
+        std::cout << std::string(indent, ' ') << "[" << std::endl;
         indexExpr->print(indent + 4);
         std::cout << std::string(indent, ' ') << "]" << std::endl;
     }
@@ -376,13 +533,15 @@ public:
 
 class ArrayAssignNode : public ASTNode {
 public:
-    std::string name;
+    std::unique_ptr<ASTNode> arrayExpr;
     std::unique_ptr<ASTNode> indexExpr;
     std::unique_ptr<ASTNode> valExpr;
-    ArrayAssignNode(std::string n, std::unique_ptr<ASTNode> idx, std::unique_ptr<ASTNode> v) 
-        : name(n), indexExpr(std::move(idx)), valExpr(std::move(v)) {}
+    ArrayAssignNode(std::unique_ptr<ASTNode> arr, std::unique_ptr<ASTNode> idx, std::unique_ptr<ASTNode> v) 
+        : arrayExpr(std::move(arr)), indexExpr(std::move(idx)), valExpr(std::move(v)) {}
     void print(int indent = 0) const override {
-        std::cout << std::string(indent, ' ') << "[ArrayAssign] " << name << "[" << std::endl;
+        std::cout << std::string(indent, ' ') << "[ArrayAssign]" << std::endl;
+        arrayExpr->print(indent + 4);
+        std::cout << std::string(indent, ' ') << "[" << std::endl;
         indexExpr->print(indent + 4);
         std::cout << std::string(indent, ' ') << "] =" << std::endl;
         valExpr->print(indent + 4);
@@ -391,6 +550,33 @@ public:
 };
 
 // Program Root Node
+// Method Call Node
+class MethodCallNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> object;
+    std::string methodName;
+    std::vector<std::unique_ptr<ASTNode>> args;
+    MethodCallNode(std::unique_ptr<ASTNode> obj, std::string name, std::vector<std::unique_ptr<ASTNode>> a) 
+        : object(std::move(obj)), methodName(name), args(std::move(a)) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[MethodCall] ." << methodName << std::endl;
+        if (object) object->print(indent + 4);
+        for (const auto& a : args) a->print(indent + 4);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+// Import Node
+class ImportNode : public ASTNode {
+public:
+    std::string moduleName;
+    ImportNode(std::string name) : moduleName(name) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Import] " << moduleName << std::endl;
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
 class ProgramNode : public ASTNode {
 public:
     std::vector<std::unique_ptr<ASTNode>> declarations;

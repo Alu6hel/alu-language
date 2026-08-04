@@ -1,0 +1,26 @@
+import "std.alu";
+
+routine main() -> int {
+    int sum = 0;
+    for (int i = 0; i < 5; i = i + 1) {
+        int temp = i * 2;
+        sum = sum + temp;
+    }
+    
+    // Test if scoping works: 'temp' should not be accessible here, 
+    // and a new 'temp' can be declared.
+    int temp = 100;
+    
+    printf("sum: %d\n", sum);
+    printf("temp: %d\n", temp);
+    
+    if (sum == 20) {
+        int x = 50;
+        printf("x: %d\n", x);
+    }
+    
+    int x = 60;
+    printf("outer x: %d\n", x);
+    
+    return 0;
+}

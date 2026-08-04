@@ -1,0 +1,15 @@
+// ALU Standard Library: net.alu
+// Low-level bindings for TCP/UDP and ChaCha20 encryption
+
+extern routine net_init() -> void;
+extern routine net_udp_broadcast(int port, string data, int length) -> int;
+extern routine net_udp_bind(int port) -> int;
+extern routine net_udp_recv(int s, string buffer, int max_len) -> int;
+
+extern routine net_tcp_listen(int port) -> int;
+extern routine net_tcp_accept(int s) -> int;
+extern routine net_tcp_recv(int s, string buffer, int max_len) -> int;
+extern routine net_tcp_send(int s, string buffer, int len) -> int;
+extern routine net_close(int s) -> void;
+
+extern routine alu_swarm_encrypt(string data, int length) -> void;

@@ -1,0 +1,170 @@
+// Pure ALU Native BMP Decoder/Encoder
+// 100% Native implementation without C dependencies (stb_image)
+
+import "std/io.alu";
+import "std/mem.alu";
+import "std/image.alu";
+
+routine read_u32(string d, int offset) -> int {
+    int b0 = int(d[offset]);
+    int b1 = int(d[offset + 1]);
+    int b2 = int(d[offset + 2]);
+    int b3 = int(d[offset + 3]);
+    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+}
+
+routine write_u32(string d, int offset, int val) -> void {
+    d[offset] = byte(val & 255);
+    d[offset + 1] = byte((val >> 8) & 255);
+    d[offset + 2] = byte((val >> 16) & 255);
+    d[offset + 3] = byte((val >> 24) & 255);
+}
+
+routine write_u16(string d, int offset, int val) -> void {
+    d[offset] = byte(val & 255);
+    d[offset + 1] = byte((val >> 8) & 255);
+}
+
+// Loads a 24-bit uncompressed BMP
+routine bmp_load(string filename) -> Image {
+    Image img;
+    img.width = 0;
+    img.height = 0;
+    img.channels = 3;
+
+
+    string f = fopen(filename, "rb");
+    if (int(f) == 0) {
+        puts("Failed to open BMP file.");
+        return img;
+    }
+
+    string header = malloc(54);
+    fread(header, 1, 54, f);
+
+    // Verify 'BM' signature
+    int valid = 1;
+    if (header[0] != byte(66)) { valid = 0; }
+    if (header[1] != byte(77)) { valid = 0; }
+    
+    if (valid == 0) {
+        puts("Not a valid BMP file.");
+        fclose(f);
+        free(header);
+        return img;
+    }
+
+    int width = read_u32(header, 18);
+    int height = read_u32(header, 22);
+    
+    img.width = width;
+    img.height = height;
+
+    int payload_size = width * height * 3;
+    string data = malloc(payload_size);
+    img.data = data;
+
+    // Read payload, handling 4-byte padding per row
+    int padding = (4 - ((width * 3) % 4)) % 4;
+    string pad_buf = malloc(4);
+    
+    for (int row = 0; row < height; row = row + 1) {
+        // BMP is stored bottom-up, we read it row by row
+        // To flip it, we calculate the destination offset
+        int dest_row = (height - 1) - row;
+        int dest_offset = dest_row * width * 3;
+        
+        string row_ptr = data + dest_offset;
+        fread(row_ptr, 1, width * 3, f);
+        
+        // Skip padding
+        if (padding > 0) {
+            fread(pad_buf, 1, padding, f);
+        }
+        
+        // Convert BGR to RGB
+        for (int col = 0; col < width * 3; col = col + 3) {
+            byte b = byte(row_ptr[col]);
+            byte g = byte(row_ptr[col + 1]);
+            byte r = byte(row_ptr[col + 2]);
+            row_ptr[col] = r;
+            row_ptr[col + 1] = g;
+            row_ptr[col + 2] = b;
+        }
+        
+    }
+
+    free(header);
+    free(pad_buf);
+    fclose(f);
+
+    return img;
+}
+
+// Saves a 24-bit uncompressed BMP
+routine bmp_save(string filename, Image img) -> int {
+    int i = 0;
+    string f = fopen(filename, "wb");
+    if (int(f) == 0) {
+        puts("Failed to open file for writing.");
+        return 0;
+    }
+
+    string header = malloc(54);
+    for (i = 0; i < 54; i = i + 1) { header[i] = byte(0);  }
+
+    int padding = (4 - ((img.width * 3) % 4)) % 4;
+    int payload_size = (img.width * 3 + padding) * img.height;
+    int filesize = 54 + payload_size;
+
+    // Header
+    header[0] = byte(66); // 'B'
+    header[1] = byte(77); // 'M'
+    write_u32(header, 2, filesize);
+    write_u32(header, 10, 54);
+
+    // DIB Header
+    write_u32(header, 14, 40);
+    write_u32(header, 18, img.width);
+    write_u32(header, 22, img.height);
+    write_u16(header, 26, 1);
+    write_u16(header, 28, 24);
+    write_u32(header, 34, payload_size);
+
+    fwrite(header, 1, 54, f);
+    
+    string pad_buf = malloc(4);
+    for (i = 0; i < 4; i = i + 1) { pad_buf[i] = byte(0);  }
+    
+    // Write pixels (BGR format, bottom up)
+    for (int row = 0; row < img.height; row = row + 1) {
+        int src_row = (img.height - 1) - row;
+        int src_offset = src_row * img.width * 3;
+        
+        string src_ptr = img.data + src_offset;
+        
+        // Write row converting RGB back to BGR
+        string row_buf = malloc(img.width * 3);
+        for (int col = 0; col < img.width * 3; col = col + 3) {
+            byte r = byte(src_ptr[col]);
+            byte g = byte(src_ptr[col + 1]);
+            byte b = byte(src_ptr[col + 2]);
+            row_buf[col] = b;
+            row_buf[col + 1] = g;
+            row_buf[col + 2] = r;
+        }
+        
+        fwrite(row_buf, 1, img.width * 3, f);
+        free(row_buf);
+        
+        if (padding > 0) {
+            fwrite(pad_buf, 1, padding, f);
+        }
+        
+    }
+
+    free(header);
+    free(pad_buf);
+    fclose(f);
+    return 1;
+}

@@ -1,18 +1,10 @@
-// ST-04: std::mem - Bump/Slab allocators bridged to CHERI bounds checking
+// ALU Native Standard Library: mem
+// Bindings to libc <stdlib.h> and <string.h> for memory
 
-routine bump_alloc(size) {
-    @requires size > 0
-    @ensures return != null
-    
-    unsafe {
-        // Assume bump_pool is globally defined in hw_mem.alu
-        cap pool = 0x400000..0x500000
-        reg ptr = pool.base + offset
-        
-        // CHERI bounds check via inline assembly macro
-        asm("cheri_bounds_check ptr, size, pool.length")
-        
-        offset = offset + size
-        return ptr
-    }
-}
+extern routine malloc(int size) -> string;
+extern routine free(string ptr) -> void;
+extern routine calloc(int num, int size) -> string;
+extern routine realloc(string ptr, int size) -> string;
+extern routine memcpy(string dest, string src, int n) -> string;
+extern routine memset(string str, int c, int n) -> string;
+extern routine memcmp(string str1, string str2, int n) -> int;

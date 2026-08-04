@@ -1,33 +1,29 @@
-// ST-02: Advanced Cryptography (std::crypto)
-// FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA) implementation wrappers
+// ST-02: Cryptography (std::crypto)
+// Advanced OpenSSL ECDSA Signatures
 
-routine ml_kem_encapsulate(public_key) {
-    @requires public_key != null
-    // Prove constant-time execution mathematically (no data-dependent branching)
-    @ensures __is_constant_time() == true
+extern routine ecdsa_sign_c(string message, int msg_len, string priv_key_pem, string sig_out, string sig_len_ptr) -> int;
+extern routine ecdsa_verify_c(string message, int msg_len, string sig, int sig_len, string pub_key_pem) -> int;
+extern routine sha256_c(string message, int msg_len, string hash_out) -> int;
+extern routine strlen(string s) -> int;
+
+// High-level wrapper for ECDSA signing
+// In a full implementation, strings would be first-class objects with length.
+// For now we use standard C-style strlen and write to a fixed buffer.
+routine ecdsa_sign(string message, string private_key_pem, string sig_out) -> int {
+    int msg_len = strlen(message);
     
-    unsafe {
-        // ML-KEM Encapsulation using branchless bitwise logic
-        reg shared_secret = 0x0
-        reg ciphertext = 0x0
-        // ... Native post-quantum polynomial multiplication ...
-        asm("fips203_encap shared_secret, ciphertext, public_key")
-        
-        return ciphertext
-    }
+    // We pass a dummy pointer for sig_len and just assume 64 bytes max for P-256 for this prototype
+    string sig_len_ptr = "\0\0\0\0"; 
+    int result = ecdsa_sign_c(message, msg_len, private_key_pem, sig_out, sig_len_ptr);
+    return result;
 }
 
-routine ml_dsa_sign(message, private_key) {
-    @requires message != null
-    @requires private_key != null
-    @ensures __is_constant_time() == true
-    
-    unsafe {
-        // ML-DSA Signing (FIPS 204)
-        reg signature = 0x0
-        // ... Native post-quantum lattice signature generation ...
-        asm("fips204_sign signature, message, private_key")
-        
-        return signature
-    }
+routine ecdsa_verify(string message, string signature, int sig_len, string public_key_pem) -> int {
+    int msg_len = strlen(message);
+    return ecdsa_verify_c(message, msg_len, signature, sig_len, public_key_pem);
+}
+
+routine sha256(string message, string hash_out) -> int {
+    int msg_len = strlen(message);
+    return sha256_c(message, msg_len, hash_out);
 }

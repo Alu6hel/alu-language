@@ -1,0 +1,5 @@
+import "testpkg";
+
+routine main() -> int {
+    return helper();
+}

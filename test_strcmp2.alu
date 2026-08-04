@@ -1,0 +1,9 @@
+import "std/io.alu";
+import "std/string.alu";
+
+routine main(int argc, string[] argv) -> int {
+    if (strcmp(argv[1], "-q") == 0) {
+        puts("yes");
+    }
+    return 0;
+}

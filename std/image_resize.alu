@@ -1,0 +1,126 @@
+// std/image_resize.alu - Image Scaling Algorithms
+
+import "std/image.alu";
+import "std/mem.alu";
+import "std/math.alu";
+
+routine resize_nearest_neighbor(Image img, int new_w, int new_h) -> Image {
+    Image out;
+    out.width = new_w;
+    out.height = new_h;
+    out.channels = img.channels;
+    out.data = malloc((new_w * (new_h * img.channels)));
+    
+    int y = 0;
+    int x = 0;
+    int c = 0;
+    int src_x = 0;
+    int src_y = 0;
+    int src_idx = 0;
+    int dst_idx = 0;
+    
+    string src = img.data;
+    string dst = out.data;
+    
+    while (y < new_h) {
+        src_y = ((y * img.height) / new_h);
+        for (x = 0; x < new_w; x = (x + 1)) {
+            src_x = ((x * img.width) / new_w);
+            
+            src_idx = (((src_y * img.width) + src_x) * img.channels);
+            dst_idx = (((y * new_w) + x) * img.channels);
+            
+            for (c = 0; c < img.channels; c = (c + 1)) {
+                dst[(dst_idx + c)] = src[(src_idx + c)];
+            }
+            
+        }
+        y = (y + 1);
+    }
+    
+    return out;
+}
+
+routine get_pixel_clamped(Image img, int x, int y, int c) -> float {
+    if (x < 0) { x = 0; }
+    if (y < 0) { y = 0; }
+    if (x >= img.width) { x = (img.width - 1); }
+    if (y >= img.height) { y = (img.height - 1); }
+    
+    int idx = (((y * img.width) + x) * img.channels);
+    string data = img.data;
+    int val = data[(idx + c)];
+    int bval = (val & 255);
+    return float(bval);
+}
+
+routine resize_bilinear(Image img, int new_w, int new_h) -> Image {
+    Image out;
+    out.width = new_w;
+    out.height = new_h;
+    out.channels = img.channels;
+    out.data = malloc((new_w * (new_h * img.channels)));
+    
+    int y = 0;
+    int x = 0;
+    int c = 0;
+    
+    string dst = out.data;
+    
+    float x_ratio = (float(img.width) / float(new_w));
+    float y_ratio = (float(img.height) / float(new_h));
+    
+    float src_x = 0.0;
+    float src_y = 0.0;
+    float x_diff = 0.0;
+    float y_diff = 0.0;
+    
+    int xi = 0;
+    int yi = 0;
+    
+    float p1 = 0.0;
+    float p2 = 0.0;
+    float p3 = 0.0;
+    float p4 = 0.0;
+    float val = 0.0;
+    int bval = 0;
+    int dst_idx = 0;
+    
+    while (y < new_h) {
+        src_y = (float(y) * y_ratio);
+        yi = int(src_y);
+        y_diff = (src_y - float(yi));
+        
+        for (x = 0; x < new_w; x = (x + 1)) {
+            src_x = (float(x) * x_ratio);
+            xi = int(src_x);
+            x_diff = (src_x - float(xi));
+            
+            dst_idx = (((y * new_w) + x) * img.channels);
+            
+            for (c = 0; c < img.channels; c = (c + 1)) {
+                p1 = get_pixel_clamped(img, xi, yi, c);
+                p2 = get_pixel_clamped(img, (xi + 1), yi, c);
+                p3 = get_pixel_clamped(img, xi, (yi + 1), c);
+                p4 = get_pixel_clamped(img, (xi + 1), (yi + 1), c);
+                
+                // Bilinear interpolation
+                val = ((p1 * (1.0 - x_diff)) * (1.0 - y_diff));
+                val = (val + ((p2 * x_diff) * (1.0 - y_diff)));
+                val = (val + ((p3 * (1.0 - x_diff)) * y_diff));
+                val = (val + ((p4 * x_diff) * y_diff));
+                
+                bval = int(val);
+                if (bval < 0) { bval = 0; }
+                if (bval > 255) { bval = 255; }
+                
+                dst[(dst_idx + c)] = bval;
+                
+            }
+            
+        }
+        y = (y + 1);
+    }
+    
+    return out;
+}

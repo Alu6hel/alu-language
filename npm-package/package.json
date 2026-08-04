@@ -1,0 +1,27 @@
+{
+  "name": "@alu/image-processor",
+  "version": "1.0.0",
+  "description": "ALU Image Processor WASM module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "alu",
+    "wasm",
+    "image-processing"
+  ],
+  "author": "Alu Team",
+  "license": "MIT",
+  "types": "app.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Alu6hel/alu-language.git"
+  },
+  "files": [
+    "index.js",
+    "app.d.ts",
+    "image_processor.js",
+    "image_processor.wasm"
+  ]
+}

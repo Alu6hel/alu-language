@@ -1,0 +1,12 @@
+extern routine printf(string fmt, ...) -> void;
+
+routine main() -> int {
+    for (int i = 0; i < 5; i = i + 1) {
+        if (i == 2) {
+            printf("i is exactly two!\n");
+        } else {
+            printf("i is %d\n", i);
+        }
+    }
+    return 0;
+}

@@ -1,0 +1,16 @@
+import "std/io.alu";
+
+routine main(int argc, string[] argv) -> int {
+    system("dir /b *.png > temp.txt");
+    string f = fopen("temp.txt", "rb");
+    if (int(f) == 0) {
+        puts("Failed to open temp.txt");
+        return 1;
+    }
+    string buffer = malloc(1024);
+    int bytes = fread(buffer, 1, 1024, f);
+    buffer[bytes] = 0;
+    fclose(f);
+    printf("Files found:\n%s\n", buffer);
+    return 0;
+}

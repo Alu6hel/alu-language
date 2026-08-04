@@ -1,0 +1,25 @@
+import "std/io.alu";
+
+routine might_fail(int val) -> int {
+    if (val == 0) {
+        throw "Cannot divide by zero!";
+    }
+    return 100 / val;
+}
+
+routine main() -> int {
+    puts("Testing Try/Catch exception handling in Alu...");
+    
+    try {
+        int result = might_fail(5);
+        printf("Result with 5: %d\n", result);
+        
+        int bad = might_fail(0);
+        printf("Result with 0: %d\n", bad);
+    } catch (string err) {
+        printf("CAUGHT EXCEPTION: %s\n", err);
+    }
+    
+    puts("Program completed normally.");
+    return 0;
+}

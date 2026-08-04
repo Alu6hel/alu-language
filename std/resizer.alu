@@ -1,0 +1,169 @@
+// ALU Native Standard Library: Image Resizer
+// Provides Nearest-Neighbor and Bilinear interpolation scaling.
+
+import "std/image.alu";
+import "std/mem.alu";
+
+routine resize_nearest(Image img, int new_w, int new_h) -> Image {
+    Image out;
+    out.width = new_w;
+    out.height = new_h;
+    out.channels = img.channels;
+    out.data = malloc(((new_w * new_h) * img.channels));
+    
+    string out_d = out.data;
+    string img_d = img.data;
+    
+    for (int y = 0; y < new_h; y = y + 1) {
+        printf("\r[Resize Nearest] %d%%", ((y * 100) / new_h));
+        fflush(0);
+        int src_y = ((y * img.height) / new_h);
+        for (int x = 0; x < new_w; x = x + 1) {
+            int src_x = ((x * img.width) / new_w);
+            
+            int dst_idx = (((y * new_w) + x) * img.channels);
+            int src_idx = (((src_y * img.width) + src_x) * img.channels);
+            
+            for (int c = 0; c < img.channels; c = c + 1) {
+                out_d[(dst_idx + c)] = img_d[(src_idx + c)];
+            }
+        }
+    }
+    return out;
+}
+
+routine resize_bilinear(Image img, int new_w, int new_h) -> Image {
+    Image out;
+    out.width = new_w;
+    out.height = new_h;
+    out.channels = img.channels;
+    out.data = malloc(((new_w * new_h) * img.channels));
+    
+    string out_d = out.data;
+    string img_d = img.data;
+    
+    int x_ratio = (((img.width - 1) * 256) / new_w);
+    int y_ratio = (((img.height - 1) * 256) / new_h);
+    
+    for (int y = 0; y < new_h; y = y + 1) {
+        printf("\r[Resize Bilinear] %d%%", ((y * 100) / new_h));
+        fflush(0);
+        int src_y_fp = (y * y_ratio);
+        int src_y = (src_y_fp >> 8);
+        int y_diff = (src_y_fp & 255);
+        
+        for (int x = 0; x < new_w; x = x + 1) {
+            int src_x_fp = (x * x_ratio);
+            int src_x = (src_x_fp >> 8);
+            int x_diff = (src_x_fp & 255);
+            
+            int idx00 = (((src_y * img.width) + src_x) * img.channels);
+            int idx10 = (idx00 + img.channels);
+            int idx01 = ((((src_y + 1) * img.width) + src_x) * img.channels);
+            int idx11 = (idx01 + img.channels);
+            
+            int dst_idx = (((y * new_w) + x) * img.channels);
+            
+            for (int c = 0; c < img.channels; c = c + 1) {
+                int p00 = (int(img_d[(idx00 + c)]) & 255);
+                int p10 = (int(img_d[(idx10 + c)]) & 255);
+                int p01 = (int(img_d[(idx01 + c)]) & 255);
+                int p11 = (int(img_d[(idx11 + c)]) & 255);
+                
+                int top = ((p00 * (256 - x_diff)) + (p10 * x_diff));
+                int bottom = ((p01 * (256 - x_diff)) + (p11 * x_diff));
+                int result = (((top * (256 - y_diff)) + (bottom * y_diff)) >> 16);
+                
+                out_d[(dst_idx + c)] = (result & 255);
+            }
+        }
+    }
+    
+    return out;
+}
+routine resize_bicubic(Image img, int new_w, int new_h) -> Image {
+    Image out;
+    out.width = new_w;
+    out.height = new_h;
+    out.channels = img.channels;
+    out.data = malloc(((new_w * new_h) * img.channels));
+    
+    string out_d = out.data;
+    string img_d = img.data;
+    
+    int x_ratio = (((img.width - 1) * 256) / new_w);
+    int y_ratio = (((img.height - 1) * 256) / new_h);
+    
+    for (int y = 0; y < new_h; y = y + 1) {
+        printf("\r[Resize Bicubic] %d%%", ((y * 100) / new_h));
+        fflush(0);
+        int src_y_fp = (y * y_ratio);
+        int src_y = (src_y_fp >> 8);
+        int y_diff = (src_y_fp & 255);
+        
+        int y_frac2 = ((y_diff * y_diff) / 256);
+        int y_frac3 = ((y_frac2 * y_diff) / 256);
+        
+        int wy0 = ( (0-y_frac3) + (y_frac2 * 2) - y_diff ) / 2;
+        int wy1 = ( (y_frac3 * 3) - (y_frac2 * 5) + 512 ) / 2;
+        int wy2 = ( (0-(y_frac3 * 3)) + (y_frac2 * 4) + y_diff ) / 2;
+        int wy3 = ( y_frac3 - y_frac2 ) / 2;
+        
+        for (int x = 0; x < new_w; x = x + 1) {
+            int src_x_fp = (x * x_ratio);
+            int src_x = (src_x_fp >> 8);
+            int x_diff = (src_x_fp & 255);
+            
+            int x_frac2 = ((x_diff * x_diff) / 256);
+            int x_frac3 = ((x_frac2 * x_diff) / 256);
+            
+            int wx0 = ( (0-x_frac3) + (x_frac2 * 2) - x_diff ) / 2;
+            int wx1 = ( (x_frac3 * 3) - (x_frac2 * 5) + 512 ) / 2;
+            int wx2 = ( (0-(x_frac3 * 3)) + (x_frac2 * 4) + x_diff ) / 2;
+            int wx3 = ( x_frac3 - x_frac2 ) / 2;
+            
+            int dst_idx = (((y * new_w) + x) * img.channels);
+            
+            for (int c = 0; c < img.channels; c = c + 1) {
+                int sum = 0;
+                
+                for (int dy = (0 - 1); dy <= 2; dy = dy + 1) {
+                    int wy = wy0;
+                    if (dy == 0) { wy = wy1; }
+                    if (dy == 1) { wy = wy2; }
+                    if (dy == 2) { wy = wy3; }
+                    
+                    int p_y = (src_y + dy);
+                    if (p_y < 0) { p_y = 0; }
+                    if (p_y >= img.height) { p_y = (img.height - 1); }
+                    
+                    int row_sum = 0;
+                    for (int dx = (0 - 1); dx <= 2; dx = dx + 1) {
+                        int wx = wx0;
+                        if (dx == 0) { wx = wx1; }
+                        if (dx == 1) { wx = wx2; }
+                        if (dx == 2) { wx = wx3; }
+                        
+                        int p_x = (src_x + dx);
+                        if (p_x < 0) { p_x = 0; }
+                        if (p_x >= img.width) { p_x = (img.width - 1); }
+                        
+                        int idx = (((p_y * img.width) + p_x) * img.channels);
+                        int p = (int(img_d[(idx + c)]) & 255);
+                        row_sum = (row_sum + (p * wx));
+                    }
+                    
+                    sum = (sum + ((row_sum / 256) * wy));
+                }
+                
+                int final_val = (sum / 256);
+                if (final_val < 0) { final_val = 0; }
+                if (final_val > 255) { final_val = 255; }
+                
+                out_d[(dst_idx + c)] = (final_val & 255);
+            }
+        }
+    }
+    
+    return out;
+}

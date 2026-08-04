@@ -1,0 +1,4 @@
+routine main() {
+    print("Hello Test")
+    return 0
+}

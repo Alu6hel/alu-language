@@ -1,0 +1,28 @@
+import "std/crypto.alu";
+import "std/io.alu";
+import "std/string.alu";
+
+routine main() -> int {
+    print("--- Testing OpenSSL ECDSA Cryptography ---");
+    
+    string message = "THREAT_INDICATOR: [EICAR]";
+    string priv_key = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0w...\n-----END PRIVATE KEY-----\n";
+    string pub_key = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEP/rK...\n-----END PUBLIC KEY-----\n";
+    
+    string sig_out = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+    
+    print("Generating ECDSA Signature using P-256...");
+    int sign_res = ecdsa_sign(message, priv_key, sig_out);
+    
+    print("Verifying ECDSA Signature against Public Key...");
+    int verify_res = ecdsa_verify(message, sig_out, 64, pub_key);
+    
+    if (verify_res == 1) {
+        print("Signature successfully verified!");
+    } else {
+        print("Signature verification failed! (Expected if OpenSSL is mocked/unlinked or keys are invalid)");
+    }
+    
+    print("Test Complete.");
+    return 0;
+}

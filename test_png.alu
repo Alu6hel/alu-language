@@ -1,0 +1,19 @@
+import "std/io.alu";
+import "std/png.alu";
+
+routine main() -> int {
+    puts("Testing PNG compiler upgrades...");
+    
+    // Test CRC32 of string "123456789" -> 0xCBF43926 = 3421780262
+    string data = "123456789";
+    int hash = crc32(data, 9);
+    
+    // In signed 32-bit: 3421780262 - 4294967296 = -873187034
+    if (hash == (0 - 873187034)) {
+        puts("CRC32 is working natively!");
+    } else {
+        puts("CRC32 failed.");
+    }
+    
+    return 0;
+}

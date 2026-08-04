@@ -1,0 +1,19 @@
+extern routine printf(string fmt, ...) -> void;
+
+routine main() -> int {
+    float a = 1.5;
+    double b = 2.5;
+    double c = a + b;
+    double d = b - a;
+    double e = a * b;
+    double f = b / a;
+    
+    printf("float a = %f\n", double(a)); // C variadic args expect double for %f
+    printf("double b = %f\n", b);
+    printf("a + b = %f\n", c);
+    printf("b - a = %f\n", d);
+    printf("a * b = %f\n", e);
+    printf("b / a = %f\n", f);
+    
+    return 0;
+}

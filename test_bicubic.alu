@@ -1,0 +1,15 @@
+import "std/io.alu";
+
+routine main() -> int {
+    int t = 128; // 0.5
+    int t2 = (t * t) / 256;
+    int t3 = (t2 * t) / 256;
+    
+    int w0 = ( (0-t3) + (t2 * 2) - t ) / 2;
+    int w1 = ( (t3 * 3) - (t2 * 5) + 512 ) / 2;
+    int w2 = ( (0-(t3 * 3)) + (t2 * 4) + t ) / 2;
+    int w3 = ( t3 - t2 ) / 2;
+    
+    printf("t=%d, w0=%d w1=%d w2=%d w3=%d sum=%d\n", t, w0, w1, w2, w3, w0+w1+w2+w3);
+    return 0;
+}

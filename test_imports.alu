@@ -1,0 +1,8 @@
+import "math.alu";
+extern routine printf(string fmt, ...) -> void;
+
+routine main() -> int {
+    int res = calculate_math(5, 10);
+    printf("Imported math result: %d\n", res);
+    return 0;
+}

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package alu.grpc;
+
+service AluImageService {
+  // Processes an image by applying transformations
+  rpc ProcessImage (ProcessImageRequest) returns (ProcessImageResponse);
+}
+
+message ProcessImageRequest {
+  bytes image_data = 1;
+  bool grayscale = 2;
+  int32 jpeg_quality = 3;
+}
+
+message ProcessImageResponse {
+  bool success = 1;
+  string error_message = 2;
+  bytes processed_image = 3;
+}

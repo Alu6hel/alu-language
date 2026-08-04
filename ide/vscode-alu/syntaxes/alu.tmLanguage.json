@@ -3,7 +3,7 @@
   "scopeName": "source.alu",
   "patterns": [
     {
-      "match": "\\b(routine|import|reg|prove|return|extern|struct|if|else|while|true|false)\\b",
+      "match": "\\b(routine|import|reg|prove|return|extern|struct|if|else|while|true|false|try|catch|throw)\\b",
       "name": "keyword.control.alu"
     },
     {

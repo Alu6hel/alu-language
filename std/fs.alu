@@ -1,0 +1,28 @@
+// ALU Native Standard Library: fs (File System)
+// Bindings to libc <stdio.h> file operations
+
+extern routine fopen_c(string filename, string mode) -> string; // returns FILE* (string in ALU)
+extern routine fclose_c(string stream) -> int;
+extern routine fread_c(string ptr, int size, int nmemb, string stream) -> int;
+extern routine fwrite_c(string ptr, int size, int nmemb, string stream) -> int;
+extern routine fseek_c(string stream, int offset, int whence) -> int;
+extern routine ftell_c(string stream) -> int;
+extern routine feof_c(string stream) -> int;
+extern routine remove_c(string filename) -> int;
+
+// Wrappers
+routine fopen(string filename, string mode) -> string {
+    return fopen_c(filename, mode);
+}
+
+routine fread(string ptr, int size, string stream) -> int {
+    return fread_c(ptr, 1, size, stream);
+}
+
+routine fwrite(string ptr, int size, string stream) -> int {
+    return fwrite_c(ptr, 1, size, stream);
+}
+
+routine fclose(string stream) -> int {
+    return fclose_c(stream);
+}

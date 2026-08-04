@@ -1,0 +1,3 @@
+routine calculate_math(int x, int y) -> int {
+    return x + y + 100;
+}

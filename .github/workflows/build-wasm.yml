@@ -1,0 +1,44 @@
+name: Build and Publish WASM NPM Package
+
+on:
+  push:
+    branches: [ "main" ]
+  release:
+    types: [published]
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v12
+        with:
+          version: latest
+          
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Build ALU Compiler
+        run: cargo build --release
+        
+      - name: Compile image_processor.alu to WASM
+        run: |
+          ./target/release/alu_cxx --target-wasm image_processor.alu
+          mv image_processor.js npm-package/
+          mv image_processor.wasm npm-package/
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          registry-url: 'https://registry.npmjs.org'
+          
+      - name: Publish to NPM
+        if: github.event_name == 'release'
+        working-directory: npm-package
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

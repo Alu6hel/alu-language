@@ -1,0 +1,128 @@
+// ALU Core Standard Library (std.alu)
+
+// ----------------------------------------------------
+// 1. Raw C Standard Library Bindings (Extern)
+// ----------------------------------------------------
+extern routine printf(string fmt, ...) -> void;
+extern routine fopen(string filename, string mode) -> string; // Using string (i8*) as generic pointer
+extern routine fclose(string stream) -> int;
+extern routine fwrite(string ptr, int size, int nmemb, string stream) -> int;
+extern routine fread(string ptr, int size, int nmemb, string stream) -> int;
+extern routine malloc(int size) -> string;
+extern routine free(string ptr) -> void;
+// Native string functions replace these C dependencies
+
+// ----------------------------------------------------
+// 2. Safe ALU Wrappers
+// ----------------------------------------------------
+
+routine print(string text) {
+    printf("%s\n", text);
+}
+
+routine print_int(int val) {
+    printf("%d\n", val);
+}
+
+// File IO Object
+struct File {
+    string handle;
+}
+
+routine (f: File*) open(string filename, string mode) -> int {
+    f.handle = fopen(filename, mode);
+    // Simple null check (in ALU string can't easily be checked for null natively yet, 
+    // but we assume success for now, or just return 1)
+    return 1;
+}
+
+routine (f: File*) write(string data, int length) -> int {
+    return fwrite(data, 1, length, f.handle);
+}
+
+routine (f: File*) read(string buffer, int length) -> int {
+    return fread(buffer, 1, length, f.handle);
+}
+
+routine (f: File*) close() {
+    fclose(f.handle);
+}
+
+// ----------------------------------------------------
+// 3. String Operations
+// ----------------------------------------------------
+
+routine str_len(string s) -> int {
+    int len = 0;
+    while ((int(s[len]) & 255) != 0) {
+        len = len + 1;
+    }
+    return len;
+}
+
+routine str_eq(string a, string b) -> int {
+    int i = 0;
+    while (1 == 1) {
+        int ca = int(a[i]) & 255;
+        int cb = int(b[i]) & 255;
+        if (ca != cb) {
+            if (ca < cb) { return 0 - 1; }
+            return 1;
+        }
+        if (ca == 0) {
+            return 0; // Both are zero and matched
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+routine str_cat(string a, string b) -> string {
+    int len_a = str_len(a);
+    int len_b = str_len(b);
+    int total_len = len_a + len_b + 1;
+    string res = malloc(total_len);
+    
+    int i = 0;
+    while (i < len_a) {
+        res[i] = a[i];
+        i = i + 1;
+    }
+    
+    int j = 0;
+    while (j < len_b) {
+        res[i + j] = b[j];
+        j = j + 1;
+    }
+    
+    res[total_len - 1] = 0;
+    return res;
+}
+routine str_concat(string dest, string src, int dest_len, int src_len) -> int {
+    int i = 0;
+    while (i < src_len) {
+        dest[dest_len + i] = src[i];
+        i = i + 1;
+    }
+    return dest_len + src_len;
+}
+
+routine print_float(int whole, int frac) {
+    printf("%d.%d\n", whole, frac);
+}
+
+// ----------------------------------------------------
+// 4. Error Handling (Result Pattern)
+// ----------------------------------------------------
+
+struct Result_Int {
+    int ok;
+    int value;
+    string error;
+}
+
+struct Result_String {
+    int ok;
+    string value;
+    string error;
+}

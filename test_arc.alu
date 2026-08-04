@@ -1,0 +1,10 @@
+extern routine printf(string s) -> void;
+
+routine test_arc() -> void {
+    string a = "hello";
+    string b = a;
+} 
+
+routine main() -> void {
+    test_arc();
+}

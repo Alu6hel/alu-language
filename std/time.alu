@@ -1,0 +1,5 @@
+// ALU Native Standard Library: time
+// Bindings to libc <time.h>
+
+extern routine time(string timer) -> int;
+extern routine clock() -> int;

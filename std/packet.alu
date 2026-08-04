@@ -1,0 +1,2 @@
+// ST-06: Packet Inspection Engine (std::packet)
+extern routine packet_extract_payload(string raw_bytes, int length, string payload_out) -> int;

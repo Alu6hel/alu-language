@@ -1,0 +1,27 @@
+extern routine printf(string fmt, ...) -> void;
+
+struct Point {
+    int x;
+    int y;
+}
+
+routine (p: Point*) print() {
+    printf("Point(x: %d, y: %d)\n", p.x, p.y);
+}
+
+routine (p: Point*) move(int dx, int dy) {
+    p.x = p.x + dx;
+    p.y = p.y + dy;
+}
+
+routine main() -> int {
+    Point pt;
+    pt.x = 10;
+    pt.y = 20;
+    
+    pt.print();
+    pt.move(5, 10);
+    pt.print();
+    
+    return 0;
+}

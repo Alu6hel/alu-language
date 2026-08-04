@@ -1,0 +1,93 @@
+import "std.alu";
+
+routine main() -> int {
+    // =============================================
+    // TEST 1: Arithmetic Operators (-, *, /, %)
+    // =============================================
+    print("=== Test 1: Arithmetic ===");
+    
+    int a;
+    a = 10;
+    int b;
+    b = 3;
+    
+    int sum;
+    sum = a + b;
+    print_int(sum);
+    
+    int diff;
+    diff = a - b;
+    print_int(diff);
+    
+    int product;
+    product = a * b;
+    print_int(product);
+    
+    int quotient;
+    quotient = a / b;
+    print_int(quotient);
+    
+    int remainder;
+    remainder = a % b;
+    print_int(remainder);
+    
+    // =============================================
+    // TEST 2: For-Loops
+    // =============================================
+    print("=== Test 2: For Loop ===");
+    
+    int total;
+    total = 0;
+    for (int i = 0; i < 5; i = i + 1) {
+        total = total + i;
+    }
+    print_int(total);
+    
+    // =============================================
+    // TEST 3: Comparison Operators (!=, <=, >=)
+    // =============================================
+    print("=== Test 3: Comparisons ===");
+    
+    if (5 != 3) {
+        print("5 != 3: true");
+    }
+    
+    if (3 <= 5) {
+        print("3 <= 5: true");
+    }
+    
+    if (5 >= 3) {
+        print("5 >= 3: true");
+    }
+    
+    // =============================================
+    // TEST 4: String Operations
+    // =============================================
+    print("=== Test 4: Strings ===");
+    
+    int len;
+    len = str_len("Hello ALU");
+    print("Length of Hello ALU:");
+    print_int(len);
+    
+    int cmp;
+    cmp = str_eq("abc", "abc");
+    print("strcmp abc==abc:");
+    print_int(cmp);
+    
+    // =============================================
+    // TEST 5: Arrays with For-Loop
+    // =============================================
+    print("=== Test 5: Arrays + For ===");
+    
+    int squares[5];
+    for (int j = 0; j < 5; j = j + 1) {
+        squares[j] = j * j;
+    }
+    for (int k = 0; k < 5; k = k + 1) {
+        print_int(squares[k]);
+    }
+    
+    print("All tests passed!");
+    return 0;
+}

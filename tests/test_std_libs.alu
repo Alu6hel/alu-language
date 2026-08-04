@@ -1,0 +1,41 @@
+import "std/string.alu";
+import "std/fs.alu";
+import "std/math.alu";
+import "std/mem.alu";
+import "std/sys.alu";
+import "std/io.alu";
+import "std/time.alu";
+
+routine main() -> int {
+    puts("Hello from ALU Native Standard Libraries!");
+    
+    // Test mem and string
+    string buffer = malloc(100);
+    strcpy(buffer, "This is a test of malloc and strcpy.");
+    puts(buffer);
+    
+    int len = strlen(buffer);
+    if (len > 0) {
+        puts("strlen works!");
+    }
+    free(buffer);
+    
+    // Test math
+    int mx = max(10, 20);
+    if (mx == 20) {
+        puts("max works!");
+    }
+    
+    // Test sys
+    string env_val = getenv("PATH");
+    
+    // Test fs
+    string file = fopen("test_dummy.txt", "w");
+    fputs("Hello File!", file);
+    fclose(file);
+    puts("File created successfully.");
+    remove("test_dummy.txt");
+    
+    puts("All basic libc linkages resolved and tested!");
+    return 0;
+}

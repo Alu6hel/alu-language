@@ -1,0 +1,139 @@
+// std/zlib_enc.alu - Native Zlib Deflate Encoder with LZ77 and Huffman
+
+import "std/mem.alu";
+import "std/math.alu";
+import "std/io.alu";
+import "std/png_enc.alu"; // For BitWriter and Adler32
+
+
+
+routine hash_3bytes(int b0, int b1, int b2) -> int {
+    int h = (((b0 << 10) ^ (b1 << 5)) ^ b2);
+    return (h & 32767);
+}
+
+routine emit_token(string out_tokens, int* count_ptr, int type, int val1, int val2) {
+    int count = *count_ptr;
+    set_int(out_tokens, (count * 3), type);
+    set_int(out_tokens, ((count * 3) + 1), val1);
+    set_int(out_tokens, ((count * 3) + 2), val2);
+    *count_ptr = (count + 1);
+}
+
+routine lz77_compress(string data, int length, int* out_token_count, int quality) -> string {
+    int i = 0;
+    string out_tokens = malloc((length * 12));
+    int token_count = 0;
+    
+    string head = malloc((32768 * 4));
+    string prev = malloc((32768 * 4));
+    
+    for (i = 0; i < 32768; i = (i + 1)) {
+        set_int(head, i, (0 - 1));
+    }
+    
+    int pos = 0;
+    int cur_b0 = 0;
+    int cur_b1 = 0;
+    int cur_b2 = 0;
+    int best_len = 0;
+    int best_dist = 0;
+    int h = 0;
+    int chain_head = 0;
+    int limit = 0;
+    int curr = 0;
+    int dist = 0;
+    int len = 0;
+    int is_matching = 0;
+    int b_curr = 0;
+    int b_pos = 0;
+    int hash_val = 0;
+    int c_head = 0;
+    
+    while (pos < length) {
+        best_len = 0;
+        best_dist = 0;
+        
+        if ((pos + 2) < length) {
+            cur_b0 = (int(data[pos]) & 255);
+            cur_b1 = (int(data[(pos + 1)]) & 255);
+            cur_b2 = (int(data[(pos + 2)]) & 255);
+            h = hash_3bytes(cur_b0, cur_b1, cur_b2);
+            
+            chain_head = get_int(head, h);
+            set_int(prev, (pos & 32767), chain_head);
+            set_int(head, h, pos);
+            
+            limit = 256;
+            if (quality <= 0) { limit = 0; }
+            else { if (quality == 1) { limit = 4; }
+            else { if (quality == 2) { limit = 8; }
+            else { if (quality == 3) { limit = 16; }
+            else { if (quality == 4) { limit = 32; }
+            else { if (quality == 5) { limit = 64; }
+            else { if (quality == 6) { limit = 128; }
+            else { if (quality == 7) { limit = 256; }
+            else { if (quality == 8) { limit = 1024; }
+            else { limit = 4096; } } } } } } } } }
+            
+            curr = chain_head;
+            
+            while ((curr >= 0) & (limit > 0)) {
+                dist = (pos - curr);
+                if (dist > 32768) { curr = (0 - 1); }
+                else {
+                    if (dist > 0) {
+                        len = 0;
+                        is_matching = 1;
+                        while ((len < 258) & (is_matching == 1)) {
+                            if ((pos + len) >= length) {
+                                is_matching = 0;
+                            } else {
+                                b_curr = (int(data[(curr + len)]) & 255);
+                                b_pos = (int(data[(pos + len)]) & 255);
+                                if (b_curr == b_pos) {
+                                    len = (len + 1);
+                                } else {
+                                    is_matching = 0;
+                                }
+                            }
+                        }
+                        
+                        if (len > best_len) {
+                            best_len = len;
+                            best_dist = dist;
+                        }
+                    }
+                    curr = get_int(prev, (curr & 32767));
+                    limit = (limit - 1);
+                }
+            }
+        }
+        
+        if (best_len >= 3) {
+            emit_token(out_tokens, &token_count, 1, best_len, best_dist);
+            for (i = 1; i < best_len; i = (i + 1)) {
+                if ((pos + i) < (length - 2)) {
+                    cur_b0 = (int(data[(pos + i)]) & 255);
+                    cur_b1 = (int(data[(pos + i + 1)]) & 255);
+                    cur_b2 = (int(data[(pos + i + 2)]) & 255);
+                    hash_val = hash_3bytes(cur_b0, cur_b1, cur_b2);
+                    c_head = get_int(head, hash_val);
+                    set_int(prev, ((pos + i) & 32767), c_head);
+                    set_int(head, hash_val, (pos + i));
+                }
+            }
+            pos = (pos + best_len);
+        } else {
+            cur_b0 = (int(data[pos]) & 255);
+            emit_token(out_tokens, &token_count, 0, cur_b0, 0);
+            pos = (pos + 1);
+        }
+    }
+    
+    free(head);
+    free(prev);
+    
+    *out_token_count = token_count;
+    return out_tokens;
+}

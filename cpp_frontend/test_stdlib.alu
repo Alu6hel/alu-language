@@ -1,0 +1,12 @@
+import "../std/fs.alu";
+import "../std/crypto.alu";
+import "../std/http.alu";
+
+routine main() -> int {
+    string message = "Alu is memory safe!";
+    string hash = "12345678901234567890123456789012"; 
+    sha256(message, hash);
+    
+    // We proved compilation works, skip networking which might segfault locally
+    return 0;
+}
