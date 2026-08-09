@@ -5,11 +5,94 @@
 #include <memory>
 #include <unordered_set>
 #include <vector>
+#include <algorithm>
 #include "lexer.h"
 #include "parser.h"
 #include "semantic_analyzer.h"
 #include "z3_verifier.h"
 #include "llvm_codegen.h"
+
+// --- Module Resolution ---
+
+// Get the directory portion of a file path (everything before the last / or \)
+static std::string getDirectory(const std::string& filepath) {
+    size_t lastSlash = filepath.find_last_of("/\\");
+    if (lastSlash == std::string::npos) return ".";
+    return filepath.substr(0, lastSlash);
+}
+
+// Check if a file exists and can be opened for reading
+static bool fileExists(const std::string& path) {
+    std::ifstream f(path);
+    return f.good();
+}
+
+// Resolve a module path to a filesystem path.
+// For module-path imports (std::fs), converts :: to / and appends .alu.
+// Search order:
+//   1. std library dir (for std:: prefix)
+//   2. Relative to the source file directory
+//   3. alu_modules/ directory
+//   4. alu_modules/pkg/pkg.alu (package entry point)
+// For legacy string imports, uses existing behavior.
+static std::string resolveModulePath(const std::string& moduleName, 
+                                      bool isModulePath,
+                                      const std::string& sourceDir,
+                                      const std::string& stdPath) {
+    if (!isModulePath) {
+        // Legacy import: return as-is, driver will handle file search
+        return moduleName;
+    }
+    
+    // Convert :: to path separator and append .alu
+    std::string relPath = moduleName;
+    // Replace all "::" with "/"
+    size_t pos = 0;
+    while ((pos = relPath.find("::", pos)) != std::string::npos) {
+        relPath.replace(pos, 2, "/");
+    }
+    std::string aluFile = relPath + ".alu";
+    
+    // 1. Try the standard library path (handles std::fs -> std/fs.alu)
+    {
+        std::string candidate = stdPath + "/" + aluFile;
+        if (fileExists(candidate)) {
+            return candidate;
+        }
+    }
+    
+    // 2. Try std path as parent (std::fs -> stdPath/../std/fs.alu is same as #1, 
+    //    but also handle if stdPath itself IS the std dir)
+    //    Actually just try relative to the source file directory
+    {
+        std::string candidate = sourceDir + "/" + aluFile;
+        if (fileExists(candidate)) {
+            return candidate;
+        }
+    }
+    
+    // 3. Try alu_modules/ directory
+    {
+        std::string candidate = "alu_modules/" + aluFile;
+        if (fileExists(candidate)) {
+            return candidate;
+        }
+    }
+    
+    // 4. Try alu_modules/pkg/pkg.alu pattern (last segment as both dir and file)
+    {
+        size_t lastSlash = relPath.find_last_of('/');
+        std::string lastSegment = (lastSlash != std::string::npos) 
+            ? relPath.substr(lastSlash + 1) : relPath;
+        std::string candidate = "alu_modules/" + relPath + "/" + lastSegment + ".alu";
+        if (fileExists(candidate)) {
+            return candidate;
+        }
+    }
+    
+    // Nothing found, return the .alu path anyway — the driver will report the error
+    return aluFile;
+}
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -23,6 +106,7 @@ int main(int argc, char* argv[]) {
     bool createXcframework = false;
     std::string ndkPath = "";
     std::string jniPackage = "com.example.alu";
+    std::string stdPath = ""; // Will be auto-detected if not set
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -34,10 +118,24 @@ int main(int argc, char* argv[]) {
             ndkPath = argv[++i];
         } else if (arg == "--package" && i + 1 < argc) {
             jniPackage = argv[++i];
+        } else if (arg == "--std-path" && i + 1 < argc) {
+            stdPath = argv[++i];
         } else if (i == 1 && (arg == "install" || arg == "build")) {
             command = arg;
         } else {
             target = arg;
+        }
+    }
+    
+    // Auto-detect std library path: try relative to the compiler executable's directory
+    if (stdPath.empty()) {
+        std::string exeDir = getDirectory(argv[0]);
+        if (fileExists(exeDir + "/std/io.alu")) {
+            stdPath = exeDir;
+        } else if (fileExists(exeDir + "/../std/io.alu")) {
+            stdPath = exeDir + "/..";
+        } else {
+            stdPath = "."; // fallback to current directory
         }
     }
 
@@ -142,40 +240,53 @@ int main(int argc, char* argv[]) {
     try {
         std::unique_ptr<ProgramNode> ast = parser.parse();
         
-        // Resolve imports
+        // Resolve imports (supports both legacy and module-path styles)
+        std::string sourceDir = getDirectory(filename);
         bool hasImports = true;
         std::unordered_set<std::string> imported_files;
         while (hasImports) {
             hasImports = false;
             for (auto it = ast->declarations.begin(); it != ast->declarations.end(); ++it) {
                 if (auto importNode = dynamic_cast<ImportNode*>(it->get())) {
-                    std::string modFile = importNode->moduleName;
+                    // Resolve the module path
+                    std::string resolvedPath = resolveModulePath(
+                        importNode->moduleName, importNode->isModulePath, sourceDir, stdPath);
                     
                     // Remove ImportNode from AST
                     ast->declarations.erase(it); 
                     
-                    if (imported_files.find(modFile) != imported_files.end()) {
+                    // Skip already-imported files (deduplication)
+                    if (imported_files.find(resolvedPath) != imported_files.end()) {
                         hasImports = true;
                         break;
                     }
-                    imported_files.insert(modFile);
+                    imported_files.insert(resolvedPath);
                     
-                    // Parse imported file
-                    std::ifstream mf(modFile);
-                    if (!mf.is_open()) {
-                        // Try inside alu_modules
+                    // Open the resolved file
+                    std::ifstream mf(resolvedPath);
+                    if (!mf.is_open() && !importNode->isModulePath) {
+                        // Legacy fallback: try alu_modules/ paths
+                        std::string modFile = importNode->moduleName;
                         std::string modulePath = "alu_modules/" + modFile;
                         mf.open(modulePath);
                         if (!mf.is_open()) {
-                            // Try alu_modules/pkg/pkg.alu
                             modulePath = "alu_modules/" + modFile + "/" + modFile + ".alu";
                             mf.open(modulePath);
-                            if (!mf.is_open()) {
-                                throw std::runtime_error("Cannot open imported file: " + modFile);
-                            }
                         }
                     }
-                    std::cout << "[DEBUG] Parsing imported file: " << modFile << std::endl;
+                    
+                    if (!mf.is_open()) {
+                        std::string errMsg = "Cannot open imported module: " + importNode->moduleName;
+                        if (importNode->isModulePath) {
+                            errMsg += "\n  Searched: " + stdPath + "/" + resolvedPath;
+                            errMsg += "\n  Searched: " + sourceDir + "/" + resolvedPath;
+                            errMsg += "\n  Searched: alu_modules/" + resolvedPath;
+                        }
+                        throw std::runtime_error(errMsg);
+                    }
+                    
+                    std::cout << "[ALU CXX] Importing module: " << importNode->moduleName 
+                              << " -> " << resolvedPath << std::endl;
                     std::stringstream mb; mb << mf.rdbuf();
                     Lexer ml(mb.str());
                     Parser mp(ml.tokenize());
@@ -356,7 +467,7 @@ int main(int argc, char* argv[]) {
             std::string objFile = baseFilename + "-" + arch + "-sim.o";
             compileCommand = "clang -x ir " + outFilename + " std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
         } else {
-            compileCommand = "clang++ -O3 -o " + outBinFilename + " " + outFilename + " ../std/fs_backend.cpp ../std/net_backend.cpp ../std/crypto_backend.cpp -lws2_32 -L../z3/bin -lz3";
+            compileCommand = "clang++ -O3 -o " + outBinFilename + " " + outFilename + " std/fs_backend.cpp std/net_backend.cpp std/crypto_backend.cpp std/image_backend.cpp -lws2_32";
         }
         
         int result = std::system(compileCommand.c_str());

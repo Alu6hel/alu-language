@@ -1,29 +1,20 @@
 // ST-02: Cryptography (std::crypto)
 // Advanced OpenSSL ECDSA Signatures
 
-extern routine ecdsa_sign_c(string message, int msg_len, string priv_key_pem, string sig_out, string sig_len_ptr) -> int;
-extern routine ecdsa_verify_c(string message, int msg_len, string sig, int sig_len, string pub_key_pem) -> int;
-extern routine sha256_c(string message, int msg_len, string hash_out) -> int;
+extern routine ecdsa_sign_c(string message, int msg_len, string priv_key_pem) -> string;
+extern routine sha256_c(string message, int msg_len) -> string;
 extern routine strlen(string s) -> int;
+extern routine malloc_c(int size) -> string;
 
 // High-level wrapper for ECDSA signing
-// In a full implementation, strings would be first-class objects with length.
-// For now we use standard C-style strlen and write to a fixed buffer.
-routine ecdsa_sign(string message, string private_key_pem, string sig_out) -> int {
+routine ecdsa_sign(string message, string private_key_pem) -> string {
     int msg_len = strlen(message);
-    
-    // We pass a dummy pointer for sig_len and just assume 64 bytes max for P-256 for this prototype
-    string sig_len_ptr = "\0\0\0\0"; 
-    int result = ecdsa_sign_c(message, msg_len, private_key_pem, sig_out, sig_len_ptr);
-    return result;
+    return ecdsa_sign_c(message, msg_len, private_key_pem);
 }
 
-routine ecdsa_verify(string message, string signature, int sig_len, string public_key_pem) -> int {
+routine sha256(string message) -> string {
     int msg_len = strlen(message);
-    return ecdsa_verify_c(message, msg_len, signature, sig_len, public_key_pem);
+    return sha256_c(message, msg_len);
 }
 
-routine sha256(string message, string hash_out) -> int {
-    int msg_len = strlen(message);
-    return sha256_c(message, msg_len, hash_out);
-}
+// Cryptography functions end here

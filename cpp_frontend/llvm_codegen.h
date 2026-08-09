@@ -10,6 +10,7 @@
 class LLVMCodeGen {
 private:
     std::stringstream ir_output;
+    bool block_terminated = false;
     std::stringstream global_strings_output;
     int tmp_counter;
     int label_counter = 0;
@@ -32,6 +33,7 @@ private:
     std::map<std::string, std::string> func_signatures; // map funcName -> signature string (if varargs)
     std::set<std::string> extern_functions; // track functions that are external C routines (no ARC)
     std::string current_func_ret_type; // track return type of current routine
+    std::string current_namespace;     // track current namespace for name mangling
     std::string target_arch; // Target architecture string
 
 public:
@@ -62,6 +64,8 @@ public:
     // Name mangling for LLVM IR unique names
     std::string getUniqueName(const std::string& sourceName);
     std::string lookupIRName(const std::string& sourceName);
+    std::string getNamespacedName(const std::string& name);
+    std::string getLLVMType(const std::string& type);
 
     // Evaluate expression and return register/value
     std::string evaluateExpression(ASTNode* expr);
@@ -106,6 +110,12 @@ public:
     void visit(YieldNode* node);
     void visit(ResumeNode* node);
     void visit(ProgramNode* node);
+    
+    // Namespace helpers
+    void visit(NamespaceNode* node);
+    void registerReturnTypes(const std::vector<std::unique_ptr<ASTNode>>& declarations);
+    void codegenDeclarationsPrePass(const std::vector<std::unique_ptr<ASTNode>>& declarations);
+    void codegenDeclarationsMainPass(const std::vector<std::unique_ptr<ASTNode>>& declarations);
     
     // Direct string emission
     void emit(const std::string& code);

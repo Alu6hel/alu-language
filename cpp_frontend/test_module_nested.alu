@@ -1,0 +1,12 @@
+// Test: multiple module imports using :: syntax
+import std::math;
+import std::fs;
+
+extern routine printf(string fmt, ...) -> void;
+
+routine main() -> int {
+    int result = abs(0 - 42);
+    int bigger = max(result, 100);
+    printf("Multi-module import test: max(abs(-42), 100) = %d\n", bigger);
+    return 0;
+}

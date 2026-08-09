@@ -1,7 +1,7 @@
 import "std.alu";
 
 routine divide(int a, int b) -> Result_Int {
-    Result_Int res;
+    Result_Int res = new Result_Int;
     if (b == 0) {
         res.ok = 0;
         res.value = 0;
@@ -15,7 +15,7 @@ routine divide(int a, int b) -> Result_Int {
 }
 
 routine parse_int(string str) -> Result_Int {
-    Result_Int res;
+    Result_Int res = new Result_Int;
     // Mock parsing
     if (str_eq(str, "invalid") == 1) {
         res.ok = 0;
@@ -30,7 +30,7 @@ routine parse_int(string str) -> Result_Int {
 }
 
 routine get_user_name(int id) -> Result_String {
-    Result_String res;
+    Result_String res = new Result_String;
     if (id < 0) {
         res.ok = 0;
         res.value = "";

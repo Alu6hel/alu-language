@@ -1,0 +1,9 @@
+// Test: mixing legacy string imports and new module path imports
+import std::math;
+import "../std/io.alu";
+
+routine main() -> int {
+    int x = max(10, 20);
+    print("Mixed import test passed!");
+    return 0;
+}

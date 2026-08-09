@@ -25,6 +25,11 @@ private:
     std::unordered_map<std::string, FunctionSignature> function_table;
     std::unordered_map<std::string, StructInfo> struct_table;
     std::unordered_map<std::string, StructDefNode*> struct_templates;
+    std::vector<std::string> current_namespace;
+    
+    std::string resolveName(const std::string& name);
+    std::string prefixName(const std::string& name);
+
     ProgramNode* current_ast;
     DataType current_routine_return_type;
     
@@ -47,6 +52,8 @@ private:
     void checkStatement(ASTNode* stmt);
     void checkRoutine(RoutineNode* routine);
     void checkProgram(ProgramNode* node);
+    void checkDeclarations(const std::vector<std::unique_ptr<ASTNode>>& declarations);
+    void checkDeclarationsSecondPass(const std::vector<std::unique_ptr<ASTNode>>& declarations);
     
 public:
     void analyze(ProgramNode* ast);

@@ -113,6 +113,15 @@ int net_tcp_send(SOCKET s, const char* buffer, int len) {
     return send(s, buffer, len, 0);
 }
 
+void net_tcp_discard(SOCKET s) {
+    char discard_buf[1024];
+    u_long mode = 1;  // 1 to enable non-blocking socket
+    ioctlsocket(s, FIONBIO, &mode);
+    recv(s, discard_buf, 1024, 0);
+    mode = 0; // back to blocking
+    ioctlsocket(s, FIONBIO, &mode);
+}
+
 void net_close(SOCKET s) {
     closesocket(s);
 }

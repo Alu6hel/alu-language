@@ -72,6 +72,7 @@ std::vector<Token> Lexer::tokenize() {
             else if (ident == "new") tokens.push_back({TokenType::TOK_NEW, ident});
             else if (ident == "export") tokens.push_back({TokenType::TOK_EXPORT, ident});
             else if (ident == "import") tokens.push_back({TokenType::TOK_IMPORT, ident});
+            else if (ident == "namespace") tokens.push_back({TokenType::TOK_NAMESPACE, ident});
             else tokens.push_back({TokenType::TOK_IDENTIFIER, ident});
         } 
         else if (isdigit(c)) {
@@ -175,12 +176,35 @@ std::vector<Token> Lexer::tokenize() {
         else if (c == '|') { tokens.push_back({TokenType::TOK_BIT_OR, "|"}); advance(); }
         else if (c == '^') { tokens.push_back({TokenType::TOK_BIT_XOR, "^"}); advance(); }
         else if (c == '~') { tokens.push_back({TokenType::TOK_BIT_NOT, "~"}); advance(); }
-        else if (c == ':') { tokens.push_back({TokenType::TOK_COLON, ":"}); advance(); }
+        else if (c == ':') {
+            advance();
+            if (currentChar() == ':') {
+                tokens.push_back({TokenType::TOK_DOUBLE_COLON, "::"});
+                advance();
+            } else {
+                tokens.push_back({TokenType::TOK_COLON, ":"});
+            }
+        }
         else if (c == '*') { tokens.push_back({TokenType::TOK_STAR, "*"}); advance(); }
         else if (c == '/') { tokens.push_back({TokenType::TOK_SLASH, "/"}); advance(); }
         else if (c == '%') { tokens.push_back({TokenType::TOK_PERCENT, "%"}); advance(); }
         else if (c == '[') { tokens.push_back({TokenType::TOK_LBRACKET, "["}); advance(); }
         else if (c == ']') { tokens.push_back({TokenType::TOK_RBRACKET, "]"}); advance(); }
+        else if (c == '@') {
+            advance();
+            std::string ident = "";
+            while (isalpha(currentChar()) || currentChar() == '_') {
+                ident += currentChar();
+                advance();
+            }
+            if (ident == "requires") {
+                tokens.push_back({TokenType::TOK_REQUIRES, "@requires"});
+            } else if (ident == "ensures") {
+                tokens.push_back({TokenType::TOK_ENSURES, "@ensures"});
+            } else {
+                tokens.push_back({TokenType::TOK_UNKNOWN, "@" + ident});
+            }
+        }
         else {
             std::string unknown = "";
             unknown += c;

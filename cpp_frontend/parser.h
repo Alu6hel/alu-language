@@ -28,10 +28,12 @@ private:
     std::string parseTypeString();
     std::unique_ptr<ASTNode> parseStatement();
     std::vector<std::unique_ptr<ASTNode>> parseBlock();
-    std::unique_ptr<RoutineNode> parseRoutine();
+    std::unique_ptr<RoutineNode> parseRoutine(bool isExported);
     std::unique_ptr<ExternRoutineNode> parseExternRoutine();
-    std::unique_ptr<StructDefNode> parseStructDef();
+    std::unique_ptr<StructDefNode> parseStructDef(bool isExported);
     std::unique_ptr<ImportNode> parseImport();
+    std::unique_ptr<NamespaceNode> parseNamespace();
+    std::string parseQualifiedName();
     
 public:
     Parser(std::vector<Token> toks);

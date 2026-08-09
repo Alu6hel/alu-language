@@ -18,19 +18,37 @@ void LLVMCodeGen::emitUnhandledFallback() {
 }
 
 void LLVMCodeGen::emitExceptionUnwind() {
+    // If we have catch blocks in scope, branch to the nearest one.
     if (!catch_labels.empty()) {
         auto catch_info = catch_labels.back();
-        int try_scope_depth = catch_info.second;
+        int catch_depth = catch_info.second;
         int current_depth = (int)var_type_stack.size();
-        int levels_to_pop = current_depth - try_scope_depth;
         
-        if (levels_to_pop > 0) {
-            emitScopeReleases(levels_to_pop);
-        }
+        // Release any scoped variables before jumping to catch
+        emitScopeReleases(current_depth - catch_depth);
         emit("  br label %" + catch_info.first);
     } else {
-        emitScopeReleases(-1); // Release everything in the function
-        emitUnhandledFallback();
+        // Unwind to caller: Release ALL scopes
+        emitScopeReleases(-1);
+        
+        // Propagate local %current_exception to caller's %__alu_err parameter if it's not null
+        std::string local_ex = getTempReg();
+        emit("  " + local_ex + " = load i8*, i8** %current_exception, align 8");
+        std::string err_check = getTempReg();
+        emit("  " + err_check + " = icmp ne i8** %__alu_err, null");
+        std::string store_err_label = getLabel("store_err");
+        std::string ret_err_label = getLabel("ret_err");
+        emit("  br i1 " + err_check + ", label %" + store_err_label + ", label %" + ret_err_label);
+        
+        emit(store_err_label + ":");
+        emit("  store i8* " + local_ex + ", i8** %__alu_err, align 8");
+        emit("  br label %" + ret_err_label);
+        
+        emit(ret_err_label + ":");
+        // Return default value
+        if (current_func_ret_type == "i32") emit("  ret i32 0");
+        else if (current_func_ret_type != "void") emit("  ret " + current_func_ret_type + " zeroinitializer");
+        else emit("  ret void");
     }
 }
 
@@ -53,7 +71,20 @@ std::string LLVMCodeGen::getLabel(const std::string& prefix) {
 }
 
 void LLVMCodeGen::emit(const std::string& code) {
+    if (code.find(":") != std::string::npos && code.find(" ") == std::string::npos) {
+        block_terminated = false;
+    }
+    if (code.find("define ") == 0 || code.find("declare ") == 0 || code.find("}") == 0 || code.find("%") == 0 || code.find("@") == 0) {
+        block_terminated = false;
+    }
+    
+    if (block_terminated) return;
+    
     ir_output << code << "\n";
+    
+    if (code.find("  ret ") == 0 || code.find("  br ") == 0 || code.find("  unreachable") == 0) {
+        block_terminated = true;
+    }
 }
 
 // --- Scope Management ---
@@ -129,7 +160,7 @@ void LLVMCodeGen::declareVarType(const std::string& name, const std::string& llv
 
 void LLVMCodeGen::declareStructType(const std::string& name, const std::string& structName) {
     if (!struct_type_stack.empty()) {
-        struct_type_stack.back()[name] = structName;
+        struct_type_stack.back()[name] = getNamespacedName(structName);
     }
 }
 
@@ -186,6 +217,7 @@ void HandleNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void YieldNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ResumeNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ProgramNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
+void NamespaceNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 
 // --- LLVMCodeGen Visitor Implementation --- //
 
@@ -252,7 +284,7 @@ std::string LLVMCodeGen::getInferredLLVMType(ASTNode* expr) {
         }
     }
     if (auto fc = dynamic_cast<FuncCallNode*>(expr)) {
-        if (func_return_types.count(fc->name)) return func_return_types[fc->name];
+        if (func_return_types.count(getNamespacedName(fc->name))) return func_return_types[getNamespacedName(fc->name)];
     }
     if (auto arr = dynamic_cast<ArrayIndexNode*>(expr)) {
         std::string arr_type = getInferredLLVMType(arr->arrayExpr.get());
@@ -332,13 +364,43 @@ void LLVMCodeGen::visit(UnsafeBlockNode* node) {
 }
 
 std::string sanitizeLLVMName(std::string name) {
+    size_t pos = 0;
+    while ((pos = name.find("::", pos)) != std::string::npos) {
+        name.replace(pos, 2, "__");
+        pos += 2;
+    }
     for (char& c : name) {
-        if (c == '<' || c == '>' || c == ',') c = '.';
+        if (c == '<' || c == '>' || c == ',' || c == ':') c = '.';
     }
     return name;
 }
 
-static std::string getLLVMType(const std::string& type) {
+std::string LLVMCodeGen::getNamespacedName(const std::string& name) {
+    if (extern_functions.count(name)) {
+        return sanitizeLLVMName(name);
+    }
+    
+    if (name.find("::") != std::string::npos) {
+        std::string res = name;
+        size_t pos = 0;
+        while ((pos = res.find("::", pos)) != std::string::npos) {
+            res.replace(pos, 2, "__");
+            pos += 2;
+        }
+        return sanitizeLLVMName(res);
+    }
+    
+    if (name == "int" || name == "float" || name == "double" || name == "string" || name == "byte" || name == "bool" || name == "void") {
+        return name;
+    }
+    
+    if (!current_namespace.empty()) {
+        return current_namespace + "__" + sanitizeLLVMName(name);
+    }
+    return sanitizeLLVMName(name);
+}
+
+std::string LLVMCodeGen::getLLVMType(const std::string& type) {
     if (type == "int") return "i32";
     if (type == "float") return "float";
     if (type == "double") return "double";
@@ -353,14 +415,14 @@ static std::string getLLVMType(const std::string& type) {
         if (base == "double") return "double*";
         if (base == "string") return "i8**";
         if (base == "byte") return "i8*";
-        return "%" + sanitizeLLVMName(base) + "*";
+        return "%" + getNamespacedName(base) + "*";
     }
     if (type.find("*") != std::string::npos) {
         std::string base = type;
         base.pop_back(); // remove *
         return getLLVMType(base) + "*";
     }
-    return "%" + sanitizeLLVMName(type) + "*"; // Custom types are passed by reference
+    return "%" + getNamespacedName(type) + "*"; // Custom types are passed by reference
 }
 
 std::string LLVMCodeGen::visit(LiteralNode* node) {
@@ -746,11 +808,17 @@ std::string LLVMCodeGen::visit(MethodCallNode* node) {
     if (ret_type == "") ret_type = "i32"; // Fallback
     
     std::string ret_reg = "0";
+    std::string call_args = args_str;
+    if (extern_functions.find(mangledName) == extern_functions.end()) {
+        if (!call_args.empty()) call_args += ", ";
+        call_args += "i8** %current_exception";
+    }
+
     if (ret_type == "void") {
-        emit("  call void @" + mangledName + "(" + args_str + ")");
+        emit("  call void @" + mangledName + "(" + call_args + ")");
     } else {
         ret_reg = getTempReg();
-        emit("  " + ret_reg + " = call " + ret_type + " @" + mangledName + "(" + args_str + ")");
+        emit("  " + ret_reg + " = call " + ret_type + " @" + mangledName + "(" + call_args + ")");
     }
     
     // Exception check
@@ -759,7 +827,7 @@ std::string LLVMCodeGen::visit(MethodCallNode* node) {
     std::string cont_label = getLabel("cont");
     std::string handle_label = getLabel("ex_handle");
     
-    emit("  " + ex_ptr + " = load i8*, i8** @__alu_exception_msg, align 8");
+    emit("  " + ex_ptr + " = load i8*, i8** %current_exception, align 8");
     emit("  " + ex_cond + " = icmp ne i8* " + ex_ptr + ", null");
     emit("  br i1 " + ex_cond + ", label %" + handle_label + ", label %" + cont_label);
     
@@ -980,7 +1048,36 @@ void LLVMCodeGen::visit(ForNode* node) {
 
 void LLVMCodeGen::visit(ThrowNode* node) {
     std::string ex_val = evaluateExpression(node->expr.get());
-    emit("  store i8* " + ex_val + ", i8** @__alu_exception_msg, align 8");
+    std::string expr_type = getInferredLLVMType(node->expr.get());
+    
+    std::string final_ptr = getTempReg();
+    
+    // If it's a struct pointer, heap allocate and copy to avoid use-after-free
+    if (expr_type.find("%") != std::string::npos && expr_type.find("*") != std::string::npos) {
+        std::string elem_type = expr_type;
+        elem_type.pop_back(); // remove '*'
+        
+        std::string malloc_reg = getTempReg();
+        // Allocate 64 bytes (plenty for our Error struct containing i32 + i8*)
+        emit("  " + malloc_reg + " = call i8* @malloc(i32 64)");
+        
+        std::string heap_ptr = getTempReg();
+        emit("  " + heap_ptr + " = bitcast i8* " + malloc_reg + " to " + expr_type);
+        
+        std::string val_reg = getTempReg();
+        emit("  " + val_reg + " = load " + elem_type + ", " + expr_type + " " + ex_val + ", align 4");
+        emit("  store " + elem_type + " " + val_reg + ", " + expr_type + " " + heap_ptr + ", align 4");
+        
+        emit("  " + final_ptr + " = bitcast " + expr_type + " " + heap_ptr + " to i8*");
+    } else {
+        if (expr_type != "i8*") {
+            emit("  " + final_ptr + " = bitcast " + expr_type + " " + ex_val + " to i8*");
+        } else {
+            final_ptr = ex_val;
+        }
+    }
+    
+    emit("  store i8* " + final_ptr + ", i8** %current_exception, align 8");
     emitExceptionUnwind();
 }
 
@@ -1007,18 +1104,31 @@ void LLVMCodeGen::visit(TryCatchNode* node) {
     emit(catch_label + ":");
     pushScope();
     
-    // Retrieve exception and clear global flag
+    // Retrieve exception and clear thread-local global flag
     std::string ex_ptr = getTempReg();
-    emit("  " + ex_ptr + " = load i8*, i8** @__alu_exception_msg, align 8");
-    emit("  store i8* null, i8** @__alu_exception_msg, align 8");
+    emit("  " + ex_ptr + " = load i8*, i8** %current_exception, align 8");
+    emit("  store i8* null, i8** %current_exception, align 8");
     
-    // Declare catch variable and assign exception string
+    // Declare catch variable
     std::string catch_var_ir = lookupIRName(node->catch_var_name);
-    emit("  %" + catch_var_ir + " = alloca i8*, align 8"); // assuming string is i8*
-    declareVarType(node->catch_var_name, "i8*"); // "string"
-    emit("  store i8* " + ex_ptr + ", i8** %" + catch_var_ir + ", align 8");
+    // Determine LLVM type for catch_var
+    std::string llvm_catch_type = getLLVMType(node->catch_var_type);
+    emit("  %" + catch_var_ir + " = alloca " + llvm_catch_type + ", align 8");
+    declareVarType(node->catch_var_name, llvm_catch_type);
+    if (node->catch_var_type != "int" && node->catch_var_type != "string" && node->catch_var_type != "bool") {
+        declareStructType(node->catch_var_name, node->catch_var_type);
+    }
+    
+    // Cast the i8* exception payload back to the expected type
+    std::string cast_ptr = getTempReg();
+    emit("  " + cast_ptr + " = bitcast i8* " + ex_ptr + " to " + llvm_catch_type);
+    emit("  store " + llvm_catch_type + " " + cast_ptr + ", " + llvm_catch_type + "* %" + catch_var_ir + ", align 8");
     
     for (const auto& stmt : node->catch_body) stmt->codegen(*this);
+    
+    if (llvm_catch_type.find("%") != std::string::npos && llvm_catch_type.find("*") != std::string::npos) {
+        emit("  call void @free(i8* " + ex_ptr + ")");
+    }
     
     popScope();
     emit("  br label %" + end_try_label);
@@ -1101,25 +1211,32 @@ std::string LLVMCodeGen::visit(FuncCallNode* node) {
         if (i < arg_vals.size() - 1) args_str += ", ";
     }
     
-    std::string ret_type = func_return_types[node->name];
+    std::string safeName = getNamespacedName(node->name);
+    std::string ret_type = func_return_types[safeName];
     if (ret_type == "") ret_type = "i32"; // Fallback
     
     std::string sig = "";
-    if (func_signatures.count(node->name)) {
-        sig = func_signatures[node->name] + " ";
+    if (func_signatures.count(safeName)) {
+        sig = func_signatures[safeName] + " ";
     }
     
     std::string res_reg = "0";
+    std::string call_args = args_str;
+    if (extern_functions.find(safeName) == extern_functions.end()) {
+        if (!call_args.empty()) call_args += ", ";
+        call_args += "i8** %current_exception";
+    }
+
     if (ret_type == "void") {
-        emit("  call void " + sig + "@" + node->name + "(" + args_str + ")");
+        emit("  call void " + sig + "@" + safeName + "(" + call_args + ")");
     } else {
         res_reg = getTempReg();
-        emit("  " + res_reg + " = call " + ret_type + " " + sig + "@" + node->name + "(" + args_str + ")");
+        emit("  " + res_reg + " = call " + ret_type + " " + sig + "@" + safeName + "(" + call_args + ")");
     }
     
     // ARC: If it's an extern function, it didn't consume the ARC reference of arguments.
     // So we must release the arguments we evaluated.
-    if (extern_functions.count(node->name)) {
+    if (extern_functions.count(safeName)) {
         for (size_t i = 0; i < arg_vals.size(); ++i) {
             if (arg_is_arc_ptr[i]) {
                 std::string cast_reg = getTempReg();
@@ -1135,7 +1252,7 @@ std::string LLVMCodeGen::visit(FuncCallNode* node) {
     std::string cont_label = getLabel("cont");
     std::string handle_label = getLabel("ex_handle");
     
-    emit("  " + ex_ptr + " = load i8*, i8** @__alu_exception_msg, align 8");
+    emit("  " + ex_ptr + " = load i8*, i8** %current_exception, align 8");
     emit("  " + ex_cond + " = icmp ne i8* " + ex_ptr + ", null");
     emit("  br i1 " + ex_cond + ", label %" + handle_label + ", label %" + cont_label);
     
@@ -1165,9 +1282,13 @@ void LLVMCodeGen::visit(RoutineNode* node) {
         params_str += ptype + " %in_" + node->params[i].name;
         if (i < node->params.size() - 1) params_str += ", ";
     }
-
-    emit("define " + ret_type + " @" + node->name + "(" + params_str + ") {");
+    std::string safeName = getNamespacedName(node->name);
+    if (!params_str.empty()) params_str += ", ";
+    params_str += "i8** %__alu_err";
+    emit("define " + ret_type + " @" + safeName + "(" + params_str + ") {");
     emit("entry:");
+    emit("  %current_exception = alloca i8*, align 8");
+    emit("  store i8* null, i8** %current_exception, align 8");
     
     // Allocate stack space for parameters
     for (const auto& p : node->params) {
@@ -1218,13 +1339,14 @@ void LLVMCodeGen::visit(ExternRoutineNode* node) {
 
     if (extern_functions.find(node->name) == extern_functions.end()) {
         extern_functions.insert(node->name);
-        emit("declare " + ret_type + " @" + node->name + "(" + params_str + ")\n");
+        std::string safeName = sanitizeLLVMName(node->name);
+        emit("declare " + ret_type + " @" + safeName + "(" + params_str + ")\n");
     }
 }
 void LLVMCodeGen::visit(StructDefNode* node) {
     if (!node->type_params.empty()) return; // skip templates
     std::string fields = "";
-    std::string safeName = sanitizeLLVMName(node->name);
+    std::string safeName = getNamespacedName(node->name);
     for (size_t i = 0; i < node->fields.size(); ++i) {
         std::string lltype = getLLVMType(node->fields[i].type);
         fields += lltype;
@@ -1430,63 +1552,29 @@ void LLVMCodeGen::visit(ProgramNode* node) {
         emit("target triple = \"x86_64-pc-windows-msvc\"\n");
     }
     
-    // Declare the C-standard puts function so we can link against msvcrt
-    emit("declare i32 @puts(i8*)\n");
+    // Memory allocation for exceptions
+    if (extern_functions.find("malloc") == extern_functions.end()) {
+        emit("declare i8* @malloc(i32)\n");
+        extern_functions.insert("malloc");
+    }
+    if (extern_functions.find("free") == extern_functions.end()) {
+        emit("declare void @free(i8*)\n");
+        extern_functions.insert("free");
+    }
     
-    // Global Exception Pointer
-    emit("@__alu_exception_msg = global i8* null, align 8\n");
+    // Legacy exception globals for C++ backend compat
+    emit("@__alu_exception_ptr = global i8* null, align 8");
+    emit("@__alu_exception_msg = global i8* null, align 8");
     
     // Fiber globals
     emit("@__alu_parent_fiber = global i8* null, align 8");
     emit("@__alu_child_fiber = global i8* null, align 8\n");
     
     // ARC Native Runtime Implementations
-    emit("declare i8* @malloc(i64)");
-    emit("declare void @free(i8*)\n");
-
-    emit("define i8* @alu_alloc(i64 %size) {");
-    emit("entry:");
-    emit("  %total_size = add i64 %size, 8");
-    emit("  %raw_ptr = call i8* @malloc(i64 %total_size)");
-    emit("  %header_ptr = bitcast i8* %raw_ptr to i64*");
-    emit("  store i64 1, i64* %header_ptr, align 8");
-    emit("  %data_ptr = getelementptr inbounds i8, i8* %raw_ptr, i64 8");
-    emit("  ret i8* %data_ptr");
-    emit("}\n");
-
-    emit("define void @alu_retain(i8* %ptr) {");
-    emit("entry:");
-    emit("  %is_null = icmp eq i8* %ptr, null");
-    emit("  br i1 %is_null, label %end, label %retain");
-    emit("retain:");
-    emit("  %header_ptr_i8 = getelementptr inbounds i8, i8* %ptr, i64 -8");
-    emit("  %header_ptr = bitcast i8* %header_ptr_i8 to i64*");
-    emit("  %refcount = load i64, i64* %header_ptr, align 8");
-    emit("  %new_refcount = add i64 %refcount, 1");
-    emit("  store i64 %new_refcount, i64* %header_ptr, align 8");
-    emit("  br label %end");
-    emit("end:");
-    emit("  ret void");
-    emit("}\n");
-
-    emit("define void @alu_release(i8* %ptr) {");
-    emit("entry:");
-    emit("  %is_null = icmp eq i8* %ptr, null");
-    emit("  br i1 %is_null, label %end, label %release");
-    emit("release:");
-    emit("  %header_ptr_i8 = getelementptr inbounds i8, i8* %ptr, i64 -8");
-    emit("  %header_ptr = bitcast i8* %header_ptr_i8 to i64*");
-    emit("  %refcount = load i64, i64* %header_ptr, align 8");
-    emit("  %new_refcount = sub i64 %refcount, 1");
-    emit("  store i64 %new_refcount, i64* %header_ptr, align 8");
-    emit("  %is_zero = icmp eq i64 %new_refcount, 0");
-    emit("  br i1 %is_zero, label %free_block, label %end");
-    emit("free_block:");
-    emit("  call void @free(i8* %header_ptr_i8)");
-    emit("  br label %end");
-    emit("end:");
-    emit("  ret void");
-    emit("}\n");
+    // Use external ARC functions from C++ backend
+    emit("declare i8* @alu_alloc(i64)");
+    emit("declare void @alu_retain(i8*)");
+    emit("declare void @alu_release(i8*)");
 
     // Windows Fiber API declarations
     emit("declare i8* @ConvertThreadToFiber(i8*)");
@@ -1494,27 +1582,66 @@ void LLVMCodeGen::visit(ProgramNode* node) {
     emit("declare void @SwitchToFiber(i8*)\n");
     
     // First pass: register return types
-    for (const auto& decl : node->declarations) {
-        if (auto routine = dynamic_cast<RoutineNode*>(decl.get())) {
-            func_return_types[routine->name] = getLLVMType(routine->returnType);
-        } else if (auto ext = dynamic_cast<ExternRoutineNode*>(decl.get())) {
-            func_return_types[ext->name] = getLLVMType(ext->returnType);
-        }
-    }
+    registerReturnTypes(node->declarations);
     
     // Pre-pass: Struct Definitions and Extern Routines
-    for (const auto& decl : node->declarations) {
-        if (dynamic_cast<StructDefNode*>(decl.get()) || dynamic_cast<ExternRoutineNode*>(decl.get())) {
-            decl->codegen(*this);
-        }
-    }
+    codegenDeclarationsPrePass(node->declarations);
     
     // Main pass: Routines and everything else
-    for (const auto& decl : node->declarations) {
-        if (!dynamic_cast<StructDefNode*>(decl.get()) && !dynamic_cast<ExternRoutineNode*>(decl.get())) {
+    codegenDeclarationsMainPass(node->declarations);
+    
+    std::cout << "[ALU LLVM CodeGen] Translation Complete." << std::endl;
+}
+
+void LLVMCodeGen::registerReturnTypes(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
+    for (const auto& decl : declarations) {
+        if (auto routine = dynamic_cast<RoutineNode*>(decl.get())) {
+            func_return_types[getNamespacedName(routine->name)] = getLLVMType(routine->returnType);
+        } else if (auto ext = dynamic_cast<ExternRoutineNode*>(decl.get())) {
+            func_return_types[ext->name] = getLLVMType(ext->returnType);
+        } else if (auto ns = dynamic_cast<NamespaceNode*>(decl.get())) {
+            std::string old_ns = current_namespace;
+            if (current_namespace.empty()) current_namespace = ns->name;
+            else current_namespace += "__" + ns->name;
+            registerReturnTypes(ns->declarations);
+            current_namespace = old_ns;
+        }
+    }
+}
+
+void LLVMCodeGen::codegenDeclarationsPrePass(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
+    for (const auto& decl : declarations) {
+        if (dynamic_cast<StructDefNode*>(decl.get()) || dynamic_cast<ExternRoutineNode*>(decl.get())) {
+            decl->codegen(*this);
+        } else if (auto ns = dynamic_cast<NamespaceNode*>(decl.get())) {
+            std::string old_ns = current_namespace;
+            if (current_namespace.empty()) current_namespace = ns->name;
+            else current_namespace += "__" + ns->name;
+            codegenDeclarationsPrePass(ns->declarations);
+            current_namespace = old_ns;
+        }
+    }
+}
+
+void LLVMCodeGen::codegenDeclarationsMainPass(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
+    for (const auto& decl : declarations) {
+        if (auto ns = dynamic_cast<NamespaceNode*>(decl.get())) {
+            std::string old_ns = current_namespace;
+            if (current_namespace.empty()) current_namespace = ns->name;
+            else current_namespace += "__" + ns->name;
+            codegenDeclarationsMainPass(ns->declarations);
+            current_namespace = old_ns;
+        } else if (!dynamic_cast<StructDefNode*>(decl.get()) && !dynamic_cast<ExternRoutineNode*>(decl.get())) {
             decl->codegen(*this);
         }
     }
-    
-    std::cout << "[ALU LLVM CodeGen] Translation Complete." << std::endl;
+}
+
+void LLVMCodeGen::visit(NamespaceNode* node) {
+    std::string old_ns = current_namespace;
+    if (current_namespace.empty()) current_namespace = node->name;
+    else current_namespace += "__" + node->name;
+    codegenDeclarationsPrePass(node->declarations);
+    codegenDeclarationsMainPass(node->declarations);
+    current_namespace = old_ns;
 }

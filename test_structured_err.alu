@@ -1,0 +1,32 @@
+import "std/io.alu";
+import "std/error.alu";
+
+routine might_fail(int val) -> int {
+    if (val == 0) {
+        // Since Alu structs are passed by reference, we need to heap-allocate to prevent stack-use-after-free,
+        // or since we are just returning/throwing, maybe stack is fine if we don't actually unwind deeply?
+        // Let's test the stack allocation first.
+        Error err = new Error;
+        err.code = 400;
+        err.message = "Cannot divide by zero!";
+        throw err;
+    }
+    return 100 / val;
+}
+
+routine main() -> int {
+    puts("Testing Structured Exception Handling in Alu...");
+    
+    try {
+        int result = might_fail(5);
+        printf("Result with 5: %d\n", result);
+        
+        int bad = might_fail(0);
+        printf("Result with 0: %d\n", bad);
+    } catch (Error e) {
+        printf("CAUGHT STRUCTURED EXCEPTION: Code %d, Message: %s\n", e.code, e.message);
+    }
+    
+    puts("Program completed normally.");
+    return 0;
+}

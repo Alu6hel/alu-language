@@ -67,6 +67,10 @@ enum class TokenType {
     TOK_FREE,
     TOK_COLON,
     TOK_IMPORT,
+    TOK_NAMESPACE,
+    TOK_DOUBLE_COLON,
+    TOK_REQUIRES,
+    TOK_ENSURES,
     TOK_UNKNOWN
 };
 

@@ -1,0 +1,4 @@
+struct Error {
+    int code;
+    string message;
+}

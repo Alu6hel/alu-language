@@ -1,0 +1,27 @@
+namespace Math {
+    struct Vector {
+        int x;
+        int y;
+    }
+
+    routine add(Vector a, Vector b) -> Vector {
+        Vector res;
+        res.x = a.x + b.x;
+        res.y = a.y + b.y;
+        return res;
+    }
+}
+
+routine main() -> int {
+    Math::Vector a;
+    a.x = 5;
+    a.y = 10;
+    
+    Math::Vector b;
+    b.x = 2;
+    b.y = 3;
+    
+    Math::Vector c = Math::add(a, b);
+    
+    return c.x;
+}

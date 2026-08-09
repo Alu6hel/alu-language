@@ -1,0 +1,12 @@
+// Test: import std::fs using new module path syntax
+import std::fs;
+
+extern routine printf(string fmt, ...) -> void;
+
+routine main() -> int {
+    string f = fopen("test_output.txt", "w");
+    fwrite("Hello from module import!", 24, f);
+    fclose(f);
+    printf("Module import test passed!\n");
+    return 0;
+}

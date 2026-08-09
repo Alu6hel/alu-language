@@ -24,15 +24,11 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+        uses: dtolnay/rust-toolchain@stable
           
       - name: Install LLVM & Clang (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y llvm clang libssl-dev
+        run: sudo apt-get install -y llvm clang libssl-dev libz3-dev
 
       - name: Install LLVM & Clang (macOS)
         if: runner.os == 'macOS'
@@ -52,20 +48,24 @@ jobs:
           fi
         shell: bash
 
-      - name: Package Artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Package Artifacts (Windows)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/release/alu* -Destination dist/
+          Copy-Item cpp_frontend/alu_cxx.exe -Destination dist/
+          Copy-Item cpp_frontend/alupm.exe -Destination dist/
+          Compress-Archive -Path dist/* -DestinationPath alu-${{ runner.os }}.zip
+        shell: pwsh
+
+      - name: Package Artifacts (Unix)
+        if: startsWith(github.ref, 'refs/tags/v') && runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp target/release/alu* dist/
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            cp cpp_frontend/alu_cxx.exe dist/
-            cp cpp_frontend/alupm.exe dist/
-            Compress-Archive -Path dist/* -DestinationPath alu-${{ runner.os }}.zip
-          else
-            cp cpp_frontend/alu_cxx dist/
-            cp cpp_frontend/alupm dist/
-            tar -czvf alu-${{ runner.os }}.tar.gz -C dist .
-          fi
+          cp cpp_frontend/alu_cxx dist/
+          cp cpp_frontend/alupm dist/
+          tar -czvf alu-${{ runner.os }}.tar.gz -C dist .
         shell: bash
         
       - name: Upload Build Artifacts

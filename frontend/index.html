@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alu Enterprise Wallet</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-grid"></div>
+    <div class="ambient-light"></div>
+    
+    <div class="dashboard">
+        <header class="header">
+            <div class="logo-area">
+                <div class="logo-icon"></div>
+                <h1>Alu Crypto Wallet</h1>
+            </div>
+            <div class="status-indicator">
+                <span class="pulse"></span>
+                <span class="status-text">Native Alu Node Online</span>
+            </div>
+        </header>
+
+        <main class="content-grid">
+            <section class="glass-panel main-panel">
+                <h2>Transaction Payload</h2>
+                <div class="input-group">
+                    <label for="tx-data">Data to Sign (JSON)</label>
+                    <textarea id="tx-data" rows="5">{
+    "to": "0xDEADBEEFCAFEBABE",
+    "amount": "1000.00",
+    "currency": "ALU",
+    "nonce": 42
+}</textarea>
+                </div>
+                <button id="sign-btn" class="cyber-btn">
+                    <span class="btn-text">SIGN TRANSACTION</span>
+                    <span class="btn-glitch"></span>
+                </button>
+            </section>
+
+            <section class="glass-panel logs-panel">
+                <h2>Cryptographic Proof</h2>
+                <div class="terminal" id="terminal-output">
+                    <div class="log-line system">Waiting for Alu Engine...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.getElementById('sign-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('sign-btn');
+            const terminal = document.getElementById('terminal-output');
+            const data = document.getElementById('tx-data').value;
+            
+            btn.classList.add('loading');
+            btn.querySelector('.btn-text').textContent = 'VERIFYING...';
+            
+            terminal.innerHTML += `<div class="log-line action">> Initiating Secure ECDSA Signing...</div>`;
+            terminal.innerHTML += `<div class="log-line payload">Payload: ${data.substring(0, 30)}...</div>`;
+            
+            try {
+                // In Alu's raw TCP implementation, we'll send it directly 
+                // We'll post to /sign which the Alu Engine handles
+                const response = await fetch('/sign', {
+                    method: 'POST',
+                    body: data
+                });
+                
+                const resultText = await response.text();
+                const [sig, hash] = resultText.split(',');
+                
+                if (sig && hash) {
+                    terminal.innerHTML += `<div class="log-line success">> SIGNATURE VALIDATED</div>`;
+                    terminal.innerHTML += `<div class="log-line sig">Sig: ${sig}</div>`;
+                } else {
+                    terminal.innerHTML += `<div class="log-line error">> ENGINE ERROR: Invalid format</div>`;
+                }
+            } catch (err) {
+                terminal.innerHTML += `<div class="log-line error">> CONNECTION REFUSED: Native engine offline.</div>`;
+            }
+            
+            btn.classList.remove('loading');
+            btn.querySelector('.btn-text').textContent = 'SIGN TRANSACTION';
+            terminal.scrollTop = terminal.scrollHeight;
+        });
+    </script>
+</body>
+</html>

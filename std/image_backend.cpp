@@ -3,6 +3,10 @@
 #include <string.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 extern "C" {
     extern char* __alu_exception_msg;
     
@@ -23,6 +27,11 @@ extern "C" {
     void* alu_realloc(void* ptr, size_t new_size) {
         if (!ptr) return alu_alloc(new_size);
         ARCHeader* old_header = (ARCHeader*)ptr - 1;
+        
+#ifdef _WIN32
+        if (IsBadReadPtr(old_header, sizeof(ARCHeader))) return realloc(ptr, new_size);
+#endif
+
         if (old_header->magic != ARC_MAGIC) {
             // Not ARC managed, just fallback (shouldn't happen in pure Alu)
             return realloc(ptr, new_size);
@@ -36,6 +45,11 @@ extern "C" {
     void alu_retain(void* ptr) {
         if (!ptr) return;
         ARCHeader* header = (ARCHeader*)ptr - 1;
+
+#ifdef _WIN32
+        if (IsBadReadPtr(header, sizeof(ARCHeader))) return;
+#endif
+
         if (header->magic == ARC_MAGIC) {
             header->ref_count++;
         }
@@ -44,6 +58,11 @@ extern "C" {
     void alu_release(void* ptr) {
         if (!ptr) return;
         ARCHeader* header = (ARCHeader*)ptr - 1;
+
+#ifdef _WIN32
+        if (IsBadReadPtr(header, sizeof(ARCHeader))) return;
+#endif
+
         if (header->magic == ARC_MAGIC) {
             header->ref_count--;
             if (header->ref_count <= 0) {

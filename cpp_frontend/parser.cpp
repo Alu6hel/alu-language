@@ -22,6 +22,17 @@ void Parser::expect(TokenType type) {
     advance();
 }
 
+std::string Parser::parseQualifiedName() {
+    std::string name = currentToken().value;
+    expect(TokenType::TOK_IDENTIFIER);
+    while (currentToken().type == TokenType::TOK_DOUBLE_COLON) {
+        advance(); // consume ::
+        name += "::" + currentToken().value;
+        expect(TokenType::TOK_IDENTIFIER);
+    }
+    return name;
+}
+
 std::unique_ptr<AsmCallNode> Parser::parseAsmCall() {
     expect(TokenType::TOK_ASM);
     expect(TokenType::TOK_LPAREN);
@@ -72,10 +83,16 @@ std::unique_ptr<ASTNode> Parser::parseExpression() {
         left = std::make_unique<DereferenceNode>(parseExpression());
     } else if (currentToken().type == TokenType::TOK_NEW) {
         advance();
-        std::string typeName = currentToken().value;
-        if (currentToken().type == TokenType::TOK_IDENTIFIER || 
-            currentToken().type == TokenType::TOK_INT_TYPE || 
-            currentToken().type == TokenType::TOK_STRING_TYPE) {
+        std::string typeName;
+        if (currentToken().type == TokenType::TOK_IDENTIFIER) {
+            typeName = parseQualifiedName();
+        } else if (currentToken().type == TokenType::TOK_INT_TYPE || 
+                   currentToken().type == TokenType::TOK_STRING_TYPE ||
+                   currentToken().type == TokenType::TOK_FLOAT_TYPE ||
+                   currentToken().type == TokenType::TOK_DOUBLE_TYPE ||
+                   currentToken().type == TokenType::TOK_BYTE_TYPE ||
+                   currentToken().type == TokenType::TOK_BOOL_TYPE) {
+            typeName = currentToken().value;
             advance();
         } else {
             throw std::runtime_error("Expected type name after 'new'");
@@ -95,8 +112,7 @@ std::unique_ptr<ASTNode> Parser::parseExpression() {
         expect(TokenType::TOK_RPAREN);
         left = std::make_unique<CastNode>(targetType, std::move(expr));
     } else if (currentToken().type == TokenType::TOK_IDENTIFIER) {
-        std::string name = currentToken().value;
-        advance();
+        std::string name = parseQualifiedName();
         if (currentToken().type == TokenType::TOK_LPAREN) {
             // Function call
             left = parseFuncCall(name);
@@ -181,8 +197,13 @@ std::unique_ptr<ASTNode> Parser::parseExpression() {
 }
 
 std::string Parser::parseTypeString() {
-    std::string typeStr = currentToken().value;
-    advance();
+    std::string typeStr;
+    if (currentToken().type == TokenType::TOK_IDENTIFIER) {
+        typeStr = parseQualifiedName();
+    } else {
+        typeStr = currentToken().value;
+        advance();
+    }
     
     if (currentToken().type == TokenType::TOK_LESS_THAN) {
         typeStr += "<";
@@ -517,8 +538,7 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
         return std::make_unique<DerefAssignNode>(std::move(target), std::move(val));
     } else if (currentToken().type == TokenType::TOK_IDENTIFIER) {
         // Could be a function call statement, assignment, member assignment, or custom type variable declaration
-        std::string name = currentToken().value;
-        advance();
+        std::string name = parseQualifiedName();
         
         if (currentToken().type == TokenType::TOK_LESS_THAN) {
             std::string typeStr = name;
@@ -641,12 +661,7 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
     }
 }
 
-std::unique_ptr<RoutineNode> Parser::parseRoutine() {
-    bool isExported = false;
-    if (currentToken().type == TokenType::TOK_EXPORT) {
-        isExported = true;
-        advance();
-    }
+std::unique_ptr<RoutineNode> Parser::parseRoutine(bool isExported) {
     expect(TokenType::TOK_ROUTINE);
     
     std::optional<Receiver> receiver = std::nullopt;
@@ -654,16 +669,13 @@ std::unique_ptr<RoutineNode> Parser::parseRoutine() {
     // Check for receiver
     if (currentToken().type == TokenType::TOK_LPAREN) {
         advance();
+        std::string rType = parseTypeString();
         std::string rName = currentToken().value;
         expect(TokenType::TOK_IDENTIFIER);
-        expect(TokenType::TOK_COLON);
-        std::string rType = currentToken().value;
-        expect(TokenType::TOK_IDENTIFIER);
         bool isPtr = false;
-        if (currentToken().type == TokenType::TOK_STAR) {
-            isPtr = true;
-            advance();
-        }
+        // Pointers are handled by parseTypeString usually, but maybe they did:
+        // routine (File* f)? If so parseTypeString returns "File*".
+        // Let's keep it clean since parseTypeString handles pointer types.
         expect(TokenType::TOK_RPAREN);
         receiver = Receiver{rName, rType, isPtr};
     }
@@ -688,18 +700,8 @@ std::unique_ptr<RoutineNode> Parser::parseRoutine() {
     
     expect(TokenType::TOK_LPAREN);
     while (currentToken().type != TokenType::TOK_RPAREN && currentToken().type != TokenType::TOK_EOF) {
-        std::string pType = currentToken().value;
-        advance();
-        while (currentToken().type == TokenType::TOK_STAR || currentToken().type == TokenType::TOK_LBRACKET) {
-            if (currentToken().type == TokenType::TOK_STAR) {
-                pType += "*";
-                advance();
-            } else if (currentToken().type == TokenType::TOK_LBRACKET) {
-                advance();
-                expect(TokenType::TOK_RBRACKET);
-                pType += "[]";
-            }
-        }
+        std::string pType = parseTypeString();
+        // pointers and arrays are now handled by parseTypeString, so we don't need the inner while loop here
         std::string pName = currentToken().value;
         advance();
         routine->params.push_back({pType, pName});
@@ -710,18 +712,7 @@ std::unique_ptr<RoutineNode> Parser::parseRoutine() {
     
     if (currentToken().type == TokenType::TOK_ARROW) {
         advance();
-        routine->returnType = currentToken().value; // e.g. "int"
-        advance();
-        while (currentToken().type == TokenType::TOK_STAR || currentToken().type == TokenType::TOK_LBRACKET) {
-            if (currentToken().type == TokenType::TOK_STAR) {
-                routine->returnType += "*";
-                advance();
-            } else if (currentToken().type == TokenType::TOK_LBRACKET) {
-                advance();
-                expect(TokenType::TOK_RBRACKET);
-                routine->returnType += "[]";
-            }
-        }
+        routine->returnType = parseTypeString();
     }
     
     routine->body = parseBlock();
@@ -746,18 +737,7 @@ std::unique_ptr<ExternRoutineNode> Parser::parseExternRoutine() {
             advance();
             break; // ... must be the last argument
         }
-        std::string type = currentToken().value;
-        advance(); // skip type
-        while (currentToken().type == TokenType::TOK_STAR || currentToken().type == TokenType::TOK_LBRACKET) {
-            if (currentToken().type == TokenType::TOK_STAR) {
-                type += "*";
-                advance();
-            } else if (currentToken().type == TokenType::TOK_LBRACKET) {
-                advance();
-                expect(TokenType::TOK_RBRACKET);
-                type += "[]";
-            }
-        }
+        std::string type = parseTypeString();
         std::string pname = currentToken().value;
         expect(TokenType::TOK_IDENTIFIER);
         params.push_back({type, pname});
@@ -773,25 +753,14 @@ std::unique_ptr<ExternRoutineNode> Parser::parseExternRoutine() {
     std::string returnType = "void"; // default
     if (currentToken().type == TokenType::TOK_ARROW) {
         advance();
-        returnType = currentToken().value; // int, string, void
-        advance();
-        while (currentToken().type == TokenType::TOK_STAR || currentToken().type == TokenType::TOK_LBRACKET) {
-            if (currentToken().type == TokenType::TOK_STAR) {
-                returnType += "*";
-                advance();
-            } else if (currentToken().type == TokenType::TOK_LBRACKET) {
-                advance();
-                expect(TokenType::TOK_RBRACKET);
-                returnType += "[]";
-            }
-        }
+        returnType = parseTypeString();
     }
     expect(TokenType::TOK_SEMICOLON);
     
     return std::make_unique<ExternRoutineNode>(name, params, isVariadic, returnType);
 }
 
-std::unique_ptr<StructDefNode> Parser::parseStructDef() {
+std::unique_ptr<StructDefNode> Parser::parseStructDef(bool isExported) {
     expect(TokenType::TOK_STRUCT);
     std::string name = currentToken().value;
     expect(TokenType::TOK_IDENTIFIER);
@@ -820,15 +789,113 @@ std::unique_ptr<StructDefNode> Parser::parseStructDef() {
         fields.push_back({typeStr, fieldName});
     }
     expect(TokenType::TOK_RBRACE);
-    return std::make_unique<StructDefNode>(name, type_params, fields);
+    return std::make_unique<StructDefNode>(name, type_params, fields, isExported);
 }
 
 std::unique_ptr<ImportNode> Parser::parseImport() {
     expect(TokenType::TOK_IMPORT);
-    std::string moduleName = currentToken().value;
-    expect(TokenType::TOK_STRING);
+    
+    if (currentToken().type == TokenType::TOK_STRING) {
+        // Legacy: import "file.alu";
+        std::string moduleName = currentToken().value;
+        advance();
+        expect(TokenType::TOK_SEMICOLON);
+        return std::make_unique<ImportNode>(moduleName, false);
+    }
+    
+    // New module-path syntax: import std::fs;
+    // Parse qualified name: ident (:: ident)*
+    if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+        throw std::runtime_error("Expected module path or string literal after 'import'");
+    }
+    
+    std::string modulePath = currentToken().value;
+    advance();
+    
+    while (currentToken().type == TokenType::TOK_DOUBLE_COLON) {
+        advance(); // consume ::
+        if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+            throw std::runtime_error("Expected identifier after '::' in import path");
+        }
+        modulePath += "::" + currentToken().value;
+        advance();
+    }
+    
     expect(TokenType::TOK_SEMICOLON);
-    return std::make_unique<ImportNode>(moduleName);
+    return std::make_unique<ImportNode>(modulePath, true);
+}
+
+std::unique_ptr<NamespaceNode> Parser::parseNamespace() {
+    expect(TokenType::TOK_NAMESPACE);
+    std::string nsName = currentToken().value;
+    expect(TokenType::TOK_IDENTIFIER);
+    expect(TokenType::TOK_LBRACE);
+    
+    auto nsNode = std::make_unique<NamespaceNode>(nsName);
+    
+    while (currentToken().type != TokenType::TOK_RBRACE && currentToken().type != TokenType::TOK_EOF) {
+        // Recursive parsing of top level items inside a namespace
+        std::vector<std::unique_ptr<ASTNode>> reqs, ens;
+        while (currentToken().type == TokenType::TOK_REQUIRES || currentToken().type == TokenType::TOK_ENSURES) {
+            bool is_req = (currentToken().type == TokenType::TOK_REQUIRES);
+            advance();
+            bool has_paren = false;
+            if (currentToken().type == TokenType::TOK_LPAREN) {
+                has_paren = true;
+                advance();
+            }
+            auto expr = parseExpression();
+            if (has_paren) {
+                expect(TokenType::TOK_RPAREN);
+            }
+            if (is_req) reqs.push_back(std::move(expr));
+            else ens.push_back(std::move(expr));
+        }
+
+        if (currentToken().type == TokenType::TOK_EXPORT) {
+            advance();
+            if (currentToken().type == TokenType::TOK_STRUCT) {
+                if (!reqs.empty() || !ens.empty()) {
+                    throw std::runtime_error("Annotations @requires/@ensures are only allowed on routines, not structs");
+                }
+                auto sd = parseStructDef(true);
+                nsNode->declarations.push_back(std::move(sd));
+            } else {
+                auto rt = parseRoutine(true);
+                rt->requires_annotations = std::move(reqs);
+                rt->ensures_annotations = std::move(ens);
+                nsNode->declarations.push_back(std::move(rt));
+            }
+        } else if (currentToken().type == TokenType::TOK_ROUTINE) {
+            auto rt = parseRoutine(false);
+            rt->requires_annotations = std::move(reqs);
+            rt->ensures_annotations = std::move(ens);
+            nsNode->declarations.push_back(std::move(rt));
+        } else if (currentToken().type == TokenType::TOK_EXTERN) {
+            auto ext = parseExternRoutine();
+            ext->requires_annotations = std::move(reqs);
+            ext->ensures_annotations = std::move(ens);
+            nsNode->declarations.push_back(std::move(ext));
+        } else if (currentToken().type == TokenType::TOK_STRUCT) {
+            if (!reqs.empty() || !ens.empty()) {
+                throw std::runtime_error("Annotations @requires/@ensures are only allowed on routines, not structs");
+            }
+            auto sd = parseStructDef(false);
+            nsNode->declarations.push_back(std::move(sd));
+        } else if (currentToken().type == TokenType::TOK_EFFECT) {
+            if (!reqs.empty() || !ens.empty()) {
+                throw std::runtime_error("Annotations @requires/@ensures are only allowed on routines, not effects");
+            }
+            nsNode->declarations.push_back(parseEffectDecl());
+        } else if (currentToken().type == TokenType::TOK_NAMESPACE) {
+            nsNode->declarations.push_back(parseNamespace());
+        } else {
+            throw std::runtime_error("Unexpected token in namespace: " + currentToken().value);
+        }
+    }
+    
+    expect(TokenType::TOK_RBRACE);
+    return nsNode;
 }
 
 
@@ -837,14 +904,60 @@ std::unique_ptr<ProgramNode> Parser::parse() {
     auto program = std::make_unique<ProgramNode>();
     
     while (currentToken().type != TokenType::TOK_EOF) {
-        if (currentToken().type == TokenType::TOK_ROUTINE || currentToken().type == TokenType::TOK_EXPORT) {
-            program->declarations.push_back(parseRoutine());
+        std::vector<std::unique_ptr<ASTNode>> reqs, ens;
+        while (currentToken().type == TokenType::TOK_REQUIRES || currentToken().type == TokenType::TOK_ENSURES) {
+            bool is_req = (currentToken().type == TokenType::TOK_REQUIRES);
+            advance();
+            bool has_paren = false;
+            if (currentToken().type == TokenType::TOK_LPAREN) {
+                has_paren = true;
+                advance();
+            }
+            auto expr = parseExpression();
+            if (has_paren) {
+                expect(TokenType::TOK_RPAREN);
+            }
+            if (is_req) reqs.push_back(std::move(expr));
+            else ens.push_back(std::move(expr));
+        }
+
+        if (currentToken().type == TokenType::TOK_EXPORT) {
+            advance();
+            if (currentToken().type == TokenType::TOK_STRUCT) {
+                if (!reqs.empty() || !ens.empty()) {
+                    throw std::runtime_error("Annotations @requires/@ensures are only allowed on routines, not structs");
+                }
+                auto sd = parseStructDef(true);
+                program->declarations.push_back(std::move(sd));
+            } else {
+                auto rt = parseRoutine(true);
+                rt->requires_annotations = std::move(reqs);
+                rt->ensures_annotations = std::move(ens);
+                program->declarations.push_back(std::move(rt));
+            }
+        } else if (currentToken().type == TokenType::TOK_ROUTINE) {
+            auto rt = parseRoutine(false);
+            rt->requires_annotations = std::move(reqs);
+            rt->ensures_annotations = std::move(ens);
+            program->declarations.push_back(std::move(rt));
         } else if (currentToken().type == TokenType::TOK_EXTERN) {
-            program->declarations.push_back(parseExternRoutine());
+            auto ext = parseExternRoutine();
+            ext->requires_annotations = std::move(reqs);
+            ext->ensures_annotations = std::move(ens);
+            program->declarations.push_back(std::move(ext));
         } else if (currentToken().type == TokenType::TOK_STRUCT) {
-            program->declarations.push_back(parseStructDef());
+            if (!reqs.empty() || !ens.empty()) {
+                throw std::runtime_error("Annotations @requires/@ensures are only allowed on routines, not structs");
+            }
+            auto sd = parseStructDef(false);
+            program->declarations.push_back(std::move(sd));
         } else if (currentToken().type == TokenType::TOK_IMPORT) {
+            if (!reqs.empty() || !ens.empty()) {
+                throw std::runtime_error("Annotations @requires/@ensures are only allowed on routines, not imports");
+            }
             program->declarations.push_back(parseImport());
+        } else if (currentToken().type == TokenType::TOK_NAMESPACE) {
+            program->declarations.push_back(parseNamespace());
         } else if (currentToken().type == TokenType::TOK_EFFECT) {
             program->declarations.push_back(parseEffectDecl());
         } else {

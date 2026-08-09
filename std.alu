@@ -26,26 +26,26 @@ routine print_int(int val) {
 
 // File IO Object
 struct File {
-    string handle;
+    string file_ptr;
 }
 
-routine (f: File*) open(string filename, string mode) -> int {
-    f.handle = fopen(filename, mode);
+routine (File f) open(string filename, string mode) -> int {
+    f.file_ptr = fopen(filename, mode);
     // Simple null check (in ALU string can't easily be checked for null natively yet, 
     // but we assume success for now, or just return 1)
     return 1;
 }
 
-routine (f: File*) write(string data, int length) -> int {
-    return fwrite(data, 1, length, f.handle);
+routine (File f) write(string data, int length) -> int {
+    return fwrite(data, 1, length, f.file_ptr);
 }
 
-routine (f: File*) read(string buffer, int length) -> int {
-    return fread(buffer, 1, length, f.handle);
+routine (File f) read(string buffer, int length) -> int {
+    return fread(buffer, 1, length, f.file_ptr);
 }
 
-routine (f: File*) close() {
-    fclose(f.handle);
+routine (File f) close() {
+    fclose(f.file_ptr);
 }
 
 // ----------------------------------------------------

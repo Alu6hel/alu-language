@@ -1,20 +1,30 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 // Windows Mock implementation since OpenSSL is missing
 extern "C" {
-    int ecdsa_sign_c(const char* message, int msg_len, const char* priv_key_pem, char* sig_out, int* sig_len) {
-        printf("[Alu Crypto] ecdsa_sign_c mock called on Windows.\n");
-        return 1;
+    char* malloc_c(int size) {
+        char* ptr = (char*)malloc(size);
+        if (ptr != NULL) {
+            memset(ptr, 0, size);
+        }
+        return ptr;
     }
-    int ecdsa_verify_c(const char* message, int msg_len, const char* sig, int sig_len, const char* pub_key_pem) {
-        printf("[Alu Crypto] ecdsa_verify_c mock called on Windows.\n");
-        return 1;
+}
+
+extern "C" void* alu_alloc(size_t size);
+
+extern "C" {
+    const char* ecdsa_sign_c(const char* message, int msg_len, const char* priv_key_pem) {
+        // We simulate the signing, but return NULL to avoid Alu ARC crashing on the returned pointer.
+        // The wallet hardcodes the response for the prototype anyway.
+        return NULL;
     }
-    int sha256_c(const char* message, int msg_len, char* hash_out) {
-        printf("[Alu Crypto] sha256_c mock called on Windows.\n");
-        return 1;
+
+    const char* sha256_c(const char* message, int msg_len) {
+        return NULL;
     }
 }
 #else

@@ -338,19 +338,33 @@ public:
     std::string name;
     std::vector<std::string> type_params;
     std::vector<StructField> fields;
-    StructDefNode(std::string n, std::vector<std::string> tp, std::vector<StructField> f) : name(n), type_params(tp), fields(f) {}
+    std::vector<std::unique_ptr<ASTNode>> requires_annotations;
+    std::vector<std::unique_ptr<ASTNode>> ensures_annotations;
+    bool isExported = false;
+    StructDefNode(std::string n, std::vector<std::string> tp, std::vector<StructField> f, bool exported = false) : name(n), type_params(tp), fields(f), isExported(exported) {}
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[StructDef] " << name;
+        if (isExported) {
+            std::cout << " (exported)";
+        }
         if (!type_params.empty()) {
             std::cout << "<";
             for (size_t i = 0; i < type_params.size(); ++i) {
-                std::cout << type_params[i] << (i + 1 < type_params.size() ? ", " : "");
+                std::cout << type_params[i] << (i < type_params.size() - 1 ? ", " : "");
             }
             std::cout << ">";
         }
         std::cout << std::endl;
+        for (const auto& req : requires_annotations) {
+            std::cout << std::string(indent + 4, ' ') << "[@requires]" << std::endl;
+            req->print(indent + 8);
+        }
+        for (const auto& ens : ensures_annotations) {
+            std::cout << std::string(indent + 4, ' ') << "[@ensures]" << std::endl;
+            ens->print(indent + 8);
+        }
         for (const auto& field : fields) {
-            std::cout << std::string(indent + 4, ' ') << field.type << " " << field.name << std::endl;
+            std::cout << std::string(indent + 4, ' ') << field.type << " " << field.name << ";" << std::endl;
         }
     }
     void codegen(LLVMCodeGen& cg) override;
@@ -390,6 +404,8 @@ public:
     std::vector<Parameter> params;
     bool isVariadic;
     std::string returnType;
+    std::vector<std::unique_ptr<ASTNode>> requires_annotations;
+    std::vector<std::unique_ptr<ASTNode>> ensures_annotations;
     
     ExternRoutineNode(std::string n, std::vector<Parameter> p, bool v, std::string rt) 
         : name(n), params(p), isVariadic(v), returnType(rt) {}
@@ -405,6 +421,14 @@ public:
             std::cout << "...";
         }
         std::cout << ") -> " << returnType << std::endl;
+        for (const auto& req : requires_annotations) {
+            std::cout << std::string(indent + 4, ' ') << "[@requires]" << std::endl;
+            req->print(indent + 8);
+        }
+        for (const auto& ens : ensures_annotations) {
+            std::cout << std::string(indent + 4, ' ') << "[@ensures]" << std::endl;
+            ens->print(indent + 8);
+        }
     }
     void codegen(LLVMCodeGen& cg) override;
 };
@@ -424,10 +448,15 @@ public:
     std::vector<std::unique_ptr<ASTNode>> body;
     std::optional<Receiver> receiver;
     bool isExported = false;
+    std::vector<std::unique_ptr<ASTNode>> requires_annotations;
+    std::vector<std::unique_ptr<ASTNode>> ensures_annotations;
 
     RoutineNode(std::string n, std::optional<Receiver> rec = std::nullopt, bool exported = false) : name(n), returnType("void"), receiver(rec), isExported(exported) {}
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[RoutineDef] ";
+        if (isExported) {
+            std::cout << "(exported) ";
+        }
         if (receiver) {
             std::cout << "(" << receiver->name << ": " << receiver->type << (receiver->isPointer ? "*" : "") << ") ";
         }
@@ -437,6 +466,14 @@ public:
             if (i < params.size() - 1) std::cout << ", ";
         }
         std::cout << ") -> " << returnType << std::endl;
+        for (const auto& req : requires_annotations) {
+            std::cout << std::string(indent + 4, ' ') << "[@requires]" << std::endl;
+            req->print(indent + 8);
+        }
+        for (const auto& ens : ensures_annotations) {
+            std::cout << std::string(indent + 4, ' ') << "[@ensures]" << std::endl;
+            ens->print(indent + 8);
+        }
         for (const auto& stmt : body) {
             stmt->print(indent + 4);
         }
@@ -570,9 +607,26 @@ public:
 class ImportNode : public ASTNode {
 public:
     std::string moduleName;
-    ImportNode(std::string name) : moduleName(name) {}
+    bool isModulePath = false; // true for `import std::fs;`, false for `import "file.alu";`
+    ImportNode(std::string name, bool modPath = false) : moduleName(name), isModulePath(modPath) {}
     void print(int indent = 0) const override {
-        std::cout << std::string(indent, ' ') << "[Import] " << moduleName << std::endl;
+        std::cout << std::string(indent, ' ') << "[Import] " << moduleName
+                  << (isModulePath ? " (module)" : " (file)") << std::endl;
+    }
+    void codegen(LLVMCodeGen& cg) override;
+};
+
+// Namespace Node
+class NamespaceNode : public ASTNode {
+public:
+    std::string name;
+    std::vector<std::unique_ptr<ASTNode>> declarations;
+    NamespaceNode(std::string name) : name(name) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Namespace] " << name << std::endl;
+        for (const auto& decl : declarations) {
+            decl->print(indent + 4);
+        }
     }
     void codegen(LLVMCodeGen& cg) override;
 };

@@ -18,15 +18,12 @@ jobs:
         with:
           version: latest
           
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        
-      - name: Build ALU Compiler
-        run: cargo build --release
+      - name: Build ALU Compiler (C++)
+        run: clang++ cpp_frontend/*.cpp -o cpp_frontend/alu_cxx -O3 -lcrypto -lssl
         
       - name: Compile image_processor.alu to WASM
         run: |
-          ./target/release/alu_cxx --target-wasm image_processor.alu
+          ./cpp_frontend/alu_cxx build image_processor.alu --target=wasm32-unknown-emscripten
           mv image_processor.js npm-package/
           mv image_processor.wasm npm-package/
           

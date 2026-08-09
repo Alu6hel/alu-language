@@ -4,6 +4,35 @@
 
 // --- Scope Management ---
 
+std::string SemanticAnalyzer::prefixName(const std::string& name) {
+    if (current_namespace.empty() || name.find("::") != std::string::npos) return name;
+    std::string prefixed = current_namespace[0];
+    for (size_t i = 1; i < current_namespace.size(); ++i) {
+        prefixed += "::" + current_namespace[i];
+    }
+    return prefixed + "::" + name;
+}
+
+std::string SemanticAnalyzer::resolveName(const std::string& name) {
+    if (name.find("::") != std::string::npos) return name; // Already fully qualified
+
+    // Try resolving from innermost namespace outwards
+    for (int i = (int)current_namespace.size(); i >= 0; --i) {
+        std::string candidate = "";
+        for (int j = 0; j < i; ++j) {
+            candidate += current_namespace[j] + "::";
+        }
+        candidate += name;
+
+        // Check if candidate exists in tables
+        if (function_table.find(candidate) != function_table.end() ||
+            struct_table.find(candidate) != struct_table.end()) {
+            return candidate;
+        }
+    }
+    return name;
+}
+
 void SemanticAnalyzer::pushScope() {
     scope_stack.emplace_back();
     struct_var_stack.emplace_back();
@@ -100,7 +129,8 @@ void SemanticAnalyzer::instantiateTemplateIfNeeded(const std::string& typeStr) {
     current_ast->declarations.push_back(std::move(new_struct));
 }
 
-DataType SemanticAnalyzer::parseDataType(const std::string& typeStr) {
+DataType SemanticAnalyzer::parseDataType(const std::string& rawTypeStr) {
+    std::string typeStr = resolveName(rawTypeStr);
     instantiateTemplateIfNeeded(typeStr);
     std::string base = typeStr;
     bool isPointer = false;
@@ -142,6 +172,7 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         return literal->type;
     }
     else if (auto funcCall = dynamic_cast<FuncCallNode*>(expr)) {
+        funcCall->name = resolveName(funcCall->name);
         if (function_table.find(funcCall->name) == function_table.end()) {
             // Built-in puts fallback if standard library is missing
             if (funcCall->name != "puts") {
@@ -262,6 +293,10 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         if (lookupSymbol(varAccess->name, t)) {
             return t;
         }
+        varAccess->name = resolveName(varAccess->name);
+        if (lookupSymbol(varAccess->name, t)) {
+            return t;
+        }
         std::string sn;
         if (lookupStructVar(varAccess->name, sn)) {
             return DataType::UNKNOWN; // Custom struct
@@ -287,6 +322,7 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         return DataType::UNKNOWN;
     }
     else if (auto allocNode = dynamic_cast<NewAllocationNode*>(expr)) {
+        allocNode->typeName = resolveName(allocNode->typeName);
         return DataType::POINTER;
     }
     else if (auto castNode = dynamic_cast<CastNode*>(expr)) {
@@ -322,6 +358,7 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
 // --- Variable Declaration Checking ---
 
 void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
+    decl->varType = resolveName(decl->varType);
     DataType expectedType = parseDataType(decl->varType);
     
     if (expectedType == DataType::UNKNOWN && struct_table.find(decl->varType) != struct_table.end()) {
@@ -546,8 +583,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
     }
     else if (auto throwNode = dynamic_cast<ThrowNode*>(stmt)) {
         DataType type = checkExpression(throwNode->expr.get());
-        if (type != DataType::STRING) {
-            throw std::runtime_error("Semantic Error: Can only throw string types.");
+        if (type != DataType::STRING && type != DataType::UNKNOWN && type != DataType::POINTER) {
+            throw std::runtime_error("Semantic Error: Can only throw string or struct types.");
         }
     }
     else if (auto tryNode = dynamic_cast<TryCatchNode*>(stmt)) {
@@ -599,7 +636,8 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
     pushScope();
     
     // Register parameters as local variables
-    for (const auto& param : routine->params) {
+    for (auto& param : routine->params) {
+        param.type = resolveName(param.type);
         DataType pt = parseDataType(param.type);
         declareSymbol(param.name, pt);
         if (pt == DataType::UNKNOWN && struct_table.find(param.type) != struct_table.end()) {
@@ -623,6 +661,7 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
         }
     }
     
+    routine->returnType = resolveName(routine->returnType);
     current_routine_return_type = parseDataType(routine->returnType);
     
     for (const auto& stmt : routine->body) {
@@ -635,28 +674,42 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
 // --- Program Checking ---
 
 void SemanticAnalyzer::checkProgram(ProgramNode* node) {
+    checkDeclarations(node->declarations);
+}
+
+void SemanticAnalyzer::checkDeclarations(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
     // First pass: Register structs and routines
-    for (size_t i = 0; i < node->declarations.size(); ++i) {
-        auto* decl = node->declarations[i].get();
+    for (size_t i = 0; i < declarations.size(); ++i) {
+        auto* decl = declarations[i].get();
         if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
+            routine->name = prefixName(routine->name);
+            routine->returnType = resolveName(routine->returnType);
             FunctionSignature sig;
             sig.returnType = parseDataType(routine->returnType);
-            for (const auto& p : routine->params) {
+            for (auto& p : routine->params) {
+                p.type = resolveName(p.type);
                 DataType t = parseDataType(p.type);
                 sig.paramTypes.push_back(t);
             }
             sig.isVariadic = false;
             function_table[routine->name] = sig;
         } else if (auto ext = dynamic_cast<ExternRoutineNode*>(decl)) {
+            ext->name = prefixName(ext->name);
+            ext->returnType = resolveName(ext->returnType);
             FunctionSignature sig;
             sig.returnType = parseDataType(ext->returnType);
-            for (const auto& p : ext->params) {
+            for (auto& p : ext->params) {
+                p.type = resolveName(p.type);
                 DataType t = parseDataType(p.type);
                 sig.paramTypes.push_back(t);
             }
             sig.isVariadic = ext->isVariadic;
             function_table[ext->name] = sig;
         } else if (auto structDef = dynamic_cast<StructDefNode*>(decl)) {
+            structDef->name = prefixName(structDef->name);
+            for (auto& f : structDef->fields) {
+                f.type = resolveName(f.type);
+            }
             if (!structDef->type_params.empty()) {
                 struct_templates[structDef->name] = structDef;
             } else {
@@ -665,16 +718,38 @@ void SemanticAnalyzer::checkProgram(ProgramNode* node) {
                 info.fields = structDef->fields;
                 struct_table[structDef->name] = info;
             }
-        } else if (auto effectDef = dynamic_cast<EffectDeclNode*>(decl)) {
-            // For now, no strict type tracking for effects globally, just pass it through
+        } else if (auto nsNode = dynamic_cast<NamespaceNode*>(decl)) {
+            current_namespace.push_back(nsNode->name);
+            checkDeclarations(nsNode->declarations);
+            current_namespace.pop_back();
         }
     }
     
     // Second pass: Check routine bodies
-    for (size_t i = 0; i < node->declarations.size(); ++i) {
-        auto* decl = node->declarations[i].get();
+    for (size_t i = 0; i < declarations.size(); ++i) {
+        auto* decl = declarations[i].get();
         if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
             checkRoutine(routine);
+        } else if (auto nsNode = dynamic_cast<NamespaceNode*>(decl)) {
+            current_namespace.push_back(nsNode->name);
+            // We already did first pass for this NS in the outer loop, but we need to do second pass
+            // Wait, we can just call second pass explicitly by doing a second pass loop inside checkDeclarations!
+            // That's what this is doing.
+            checkDeclarationsSecondPass(nsNode->declarations);
+            current_namespace.pop_back();
+        }
+    }
+}
+
+void SemanticAnalyzer::checkDeclarationsSecondPass(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
+    for (size_t i = 0; i < declarations.size(); ++i) {
+        auto* decl = declarations[i].get();
+        if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
+            checkRoutine(routine);
+        } else if (auto nsNode = dynamic_cast<NamespaceNode*>(decl)) {
+            current_namespace.push_back(nsNode->name);
+            checkDeclarationsSecondPass(nsNode->declarations);
+            current_namespace.pop_back();
         }
     }
 }
