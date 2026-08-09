@@ -1,20 +1,89 @@
 // ST-07: The Holy Grail - Compile the ALU compiler natively in ALU (alu.alu)
+// A self-hosted lexer subset
 
-routine compile(source) {
-    @requires source != null
-    @ensures return != null
-    
-    // Core Compilation Pipeline mapped natively in ALU language
-    cap mem = 0x100000..0x200000
-    
-    // 1. Lexing
-    // 2. Parsing (EBNF Grammar ST-02)
-    // 3. Verification (Hoare Logic ST-03)
-    // 4. Emitting (Target ST-10)
-    
-    unsafe {
-        // Output fully native Alugandr OS executable block
-        reg result = mem.base
-        return result
+extern routine printf(string format, ...) -> int;
+
+routine lex(string source, int length) -> int {
+    int i = 0;
+    int token_count = 0;
+    while (i < length) {
+        int c = source[i];
+        
+        if (c == 32) { // space
+            i = i + 1;
+        } else {
+            if (c == 10) { // newline
+                i = i + 1;
+            } else {
+                if (c == 43) { // '+'
+                    printf("Token: PLUS\n");
+                    i = i + 1;
+                    token_count = token_count + 1;
+                } else {
+                    if (c == 45) { // '-'
+                        printf("Token: MINUS\n");
+                        i = i + 1;
+                        token_count = token_count + 1;
+                    } else {
+                        if (c == 42) { // '*'
+                            printf("Token: STAR\n");
+                            i = i + 1;
+                            token_count = token_count + 1;
+                        } else {
+                            if (c >= 48) { // >= '0'
+                                if (c <= 57) { // <= '9'
+                                    printf("Token: NUMBER\n");
+                                    i = i + 1;
+                                    token_count = token_count + 1;
+                                    
+                                    // consume rest of number
+                                    int is_num = 1;
+                                    while (is_num == 1) {
+                                        if (i < length) {
+                                            int n = source[i];
+                                            if (n >= 48) {
+                                                if (n <= 57) {
+                                                    i = i + 1;
+                                                } else {
+                                                    is_num = 0;
+                                                }
+                                            } else {
+                                                is_num = 0;
+                                            }
+                                        } else {
+                                            is_num = 0;
+                                        }
+                                    }
+                                } else {
+                                    printf("Token: UNKNOWN (%d)\n", c);
+                                    i = i + 1;
+                                    token_count = token_count + 1;
+                                }
+                            } else {
+                                printf("Token: UNKNOWN (%d)\n", c);
+                                i = i + 1;
+                                token_count = token_count + 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+    return token_count;
+}
+
+routine main() -> int {
+    printf("--- Alu Self-Hosted Lexer v1.0 ---\n");
+    
+    string code = "1337 + 42 - 5 * 10";
+    printf("Lexing source code: %s\n", code);
+    
+    // length of "1337 + 42 - 5 * 10" is 18
+    int tokens = lex(code, 18);
+    
+    printf("Total tokens lexed: %d\n", tokens);
+    printf("--- Compilation pipeline advanced! ---\n");
+    
+    return 0;
 }
