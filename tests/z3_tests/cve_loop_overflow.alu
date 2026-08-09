@@ -1,0 +1,14 @@
+routine main() -> int {
+    int data[5];
+    int i = 0;
+    
+    // Loop increments i, but condition is i <= 5
+    // When i == 5, this will access data[5], which is out of bounds (0..4)
+    // Z3 should theoretically catch this during symbolic execution
+    while (i <= 5) {
+        data[i + 5] = i;
+        i = i + 1;
+    }
+    
+    return 0;
+}

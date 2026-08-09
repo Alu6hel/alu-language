@@ -1,0 +1,10 @@
+routine main() -> int {
+    int buffer[10];
+    
+    // CVE-class bug: Out-of-bounds write
+    // buffer size is 10 (indices 0..9)
+    // Z3 should catch this memory violation.
+    buffer[15] = 42;
+    
+    return 0;
+}

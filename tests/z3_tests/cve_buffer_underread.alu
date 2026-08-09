@@ -1,0 +1,14 @@
+routine main() -> int {
+    int secret_key[16];
+    
+    // Simulate populating the secret key
+    secret_key[0] = 5;
+    
+    // CVE-class bug: Out-of-bounds read/underread
+    // Negative index accesses memory before the array boundary
+    // Z3 should catch this mathematical violation.
+    int x = 0 - 5;
+    int leaked_data = secret_key[x];
+    
+    return leaked_data;
+}

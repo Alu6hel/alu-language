@@ -83,6 +83,10 @@ z3::expr Z3Verifier::evalExpression(ASTNode* expr) {
         if (binop->op == "&&") return left && right;
         if (binop->op == "||") return left || right;
     }
+    else if (auto arrIndex = dynamic_cast<ArrayIndexNode*>(expr)) {
+        verifyBounds(arrIndex->arrayExpr.get(), arrIndex->indexExpr.get());
+        return ctx.int_const("dummy_arr_val");
+    }
     // Fallback to a dummy variable
     return ctx.int_const("dummy");
 }
@@ -121,8 +125,11 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
             popScope();
         }
     } else if (auto whileNode = dynamic_cast<WhileNode*>(stmt)) {
-        // Simplified loop unrolling (1 iteration for bounds checking)
+        // We want to prove safety for ANY iteration.
+        // So we create a fresh scope where we DON'T know the exact values of variables,
+        // but we DO know the loop condition holds.
         pushScope();
+        // Just add the condition, assuming loop variables could be anything satisfying it
         z3::expr cond = evalExpression(whileNode->condition.get());
         solver.add(cond);
         for (const auto& s : whileNode->body) checkStatement(s.get());
