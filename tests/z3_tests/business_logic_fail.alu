@@ -1,0 +1,14 @@
+routine withdraw(int balance, int amount) -> int {
+    if (balance > 0) {
+        // Bug: We check balance > 0, but not balance >= amount!
+        int new_balance = balance - amount;
+        assert(new_balance >= 0);
+        return new_balance;
+    }
+    return balance;
+}
+
+routine main() -> int {
+    int x = withdraw(100, 500);
+    return 0;
+}

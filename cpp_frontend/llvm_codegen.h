@@ -36,7 +36,23 @@ private:
     std::string current_namespace;     // track current namespace for name mangling
     std::string target_arch; // Target architecture string
 
+    // DWARF Debug Info State
+
+    int di_counter = 10;
+    int di_cu_id = -1;
+    std::map<std::string, int> di_file_ids;
+    std::map<std::string, int> di_type_ids;
+    std::stringstream di_output;
+    ASTNode* current_debug_node = nullptr;
+    int current_di_scope = -1;
+
+    int getDIFile(const std::string& filename);
+    int getDIType(const std::string& typeName);
+    std::string getDILoc();
+
+
 public:
+    bool emit_debug_info = false;
     LLVMCodeGen(const std::string& target = "");
     
     // Core methods to retrieve the emitted IR string
@@ -84,6 +100,7 @@ public:
     void visit(TryCatchNode* node);
     void visit(ThrowNode* node);
     void visit(ReturnNode* node);
+    void visit(AssertNode* node);
     std::string visit(FuncCallNode* node);
     void visit(RoutineNode* node);
     void visit(ExternRoutineNode* node);
@@ -118,6 +135,6 @@ public:
     void codegenDeclarationsMainPass(const std::vector<std::unique_ptr<ASTNode>>& declarations);
     
     // Direct string emission
-    void emit(const std::string& code);
+    void emit(const std::string& code, ASTNode* node = nullptr);
 };
 

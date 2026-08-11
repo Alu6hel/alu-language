@@ -1,0 +1,14 @@
+// ALU Test: @ensures contract VIOLATED by the return value.
+// bad_transform(1) returns 1, but @ensures(return > 10) requires result > 10.
+// Expected: Z3 catches the violation and emits [ALU CXX Z3 FATAL].
+
+@requires(x > 0)
+@ensures(return > 10)
+routine bad_transform(int x) -> int {
+    return x;
+}
+
+routine main() -> int {
+    int val = bad_transform(1);
+    return 0;
+}

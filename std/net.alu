@@ -1,15 +1,54 @@
-// ALU Standard Library: net.alu
-// Low-level bindings for TCP/UDP and ChaCha20 encryption
+// ALU Native Standard Library: net (Networking)
+// Bindings to net_backend.cpp (TCP/UDP Sockets)
 
-extern routine net_init() -> void;
-extern routine net_udp_broadcast(int port, string data, int length) -> int;
-extern routine net_udp_bind(int port) -> int;
-extern routine net_udp_recv(int s, string buffer, int max_len) -> int;
+import "std/string.alu";
 
+// Low-level C bindings
 extern routine net_tcp_listen(int port) -> int;
 extern routine net_tcp_accept(int s) -> int;
 extern routine net_tcp_recv(int s, string buffer, int max_len) -> int;
 extern routine net_tcp_send(int s, string buffer, int len) -> int;
+extern routine net_tcp_connect(string host, int port) -> int;
 extern routine net_close(int s) -> void;
 
-extern routine alu_swarm_encrypt(string data, int length) -> void;
+// Safe Alu Wrappers
+routine tcp_listen(int port) -> int {
+    return net_tcp_listen(port);
+}
+
+routine tcp_accept(int server_fd) -> int {
+    return net_tcp_accept(server_fd);
+}
+
+extern routine net_tcp_recv_string(int s, int max_len) -> string;
+
+routine tcp_recv(int socket_fd, int max_len) -> string {
+    return net_tcp_recv_string(socket_fd, max_len);
+}
+
+routine tcp_send(int socket_fd, string data, int len) -> int {
+    return net_tcp_send(socket_fd, data, len);
+}
+
+routine tcp_connect(string host, int port) -> int {
+    return net_tcp_connect(host, port);
+}
+
+routine tcp_close(int socket_fd) -> void {
+    net_close(socket_fd);
+}
+
+// Basic HTTP server response utility
+routine http_send_response(int socket_fd, string content) -> int {
+    string header1 = "HTTP/1.1 200 OK\r\n";
+    string header2 = "Content-Type: text/plain\r\n";
+    string header3 = "Connection: close\r\n\r\n";
+    
+    tcp_send(socket_fd, header1, strlen(header1));
+    tcp_send(socket_fd, header2, strlen(header2));
+    tcp_send(socket_fd, header3, strlen(header3));
+    
+    tcp_send(socket_fd, content, strlen(content));
+    
+    return 1;
+}

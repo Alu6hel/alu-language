@@ -1,0 +1,47 @@
+import "std/net.alu";
+import "std/io.alu";
+import "std/string.alu";
+
+routine main() -> int {
+    puts("STARTING net test (TCP Client)...");
+
+    // Connect to an HTTP server (e.g. example.com:80 or google.com:80)
+    // We'll use 93.184.216.34 (example.com) to avoid DNS lookup since we haven't bound gethostbyname fully in Alu if it expects an IP.
+    // Wait, net_tcp_connect in net_backend.cpp uses gethostbyname, so it CAN resolve domains!
+    string host = "example.com";
+    int port = 80;
+    
+    int sock = tcp_connect(host, port);
+    if (sock == (0 - 1)) {
+        puts("[FAIL] tcp_connect to example.com:80");
+        return 1;
+    }
+    puts("[PASS] tcp_connect");
+
+    string req = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n";
+    int sent = tcp_send(sock, req, strlen(req));
+    if (sent <= 0) {
+        puts("[FAIL] tcp_send");
+        tcp_close(sock);
+        return 1;
+    }
+    puts("[PASS] tcp_send");
+
+    string res = tcp_recv(sock, 1024);
+    if (strlen(res) > 0) {
+        puts("[PASS] tcp_recv");
+        puts("--- HTTP Response Snippet ---");
+        
+        // Print just the first few bytes to show it works, or just print it if it's small.
+        // It's capped at 1024 bytes by tcp_recv.
+        puts(res);
+        puts("-----------------------------");
+    } else {
+        puts("[FAIL] tcp_recv returned 0 bytes");
+    }
+
+    tcp_close(sock);
+    puts("[PASS] tcp_close");
+    
+    return 0;
+}

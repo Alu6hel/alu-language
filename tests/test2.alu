@@ -1,0 +1,5 @@
+extern routine say_hello() -> int;
+
+routine main() -> int {
+    return say_hello();
+}

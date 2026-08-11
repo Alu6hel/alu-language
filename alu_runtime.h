@@ -10,6 +10,10 @@ extern "C" {
         return malloc(size);
     }
     
+    void* __alu_alloc_internal(int32_t size) {
+        return malloc(size);
+    }
+    
     void alu_free(void* ptr) {
         free(ptr);
     }

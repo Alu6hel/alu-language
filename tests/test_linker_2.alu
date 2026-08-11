@@ -1,0 +1,5 @@
+import "test_linker.alu";
+
+routine bar() -> int {
+    return 42;
+}

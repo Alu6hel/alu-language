@@ -11,88 +11,9 @@
 #include "semantic_analyzer.h"
 #include "z3_verifier.h"
 #include "llvm_codegen.h"
+#include "linker.h"
 
-// --- Module Resolution ---
-
-// Get the directory portion of a file path (everything before the last / or \)
-static std::string getDirectory(const std::string& filepath) {
-    size_t lastSlash = filepath.find_last_of("/\\");
-    if (lastSlash == std::string::npos) return ".";
-    return filepath.substr(0, lastSlash);
-}
-
-// Check if a file exists and can be opened for reading
-static bool fileExists(const std::string& path) {
-    std::ifstream f(path);
-    return f.good();
-}
-
-// Resolve a module path to a filesystem path.
-// For module-path imports (std::fs), converts :: to / and appends .alu.
-// Search order:
-//   1. std library dir (for std:: prefix)
-//   2. Relative to the source file directory
-//   3. alu_modules/ directory
-//   4. alu_modules/pkg/pkg.alu (package entry point)
-// For legacy string imports, uses existing behavior.
-static std::string resolveModulePath(const std::string& moduleName, 
-                                      bool isModulePath,
-                                      const std::string& sourceDir,
-                                      const std::string& stdPath) {
-    if (!isModulePath) {
-        // Legacy import: return as-is, driver will handle file search
-        return moduleName;
-    }
-    
-    // Convert :: to path separator and append .alu
-    std::string relPath = moduleName;
-    // Replace all "::" with "/"
-    size_t pos = 0;
-    while ((pos = relPath.find("::", pos)) != std::string::npos) {
-        relPath.replace(pos, 2, "/");
-    }
-    std::string aluFile = relPath + ".alu";
-    
-    // 1. Try the standard library path (handles std::fs -> std/fs.alu)
-    {
-        std::string candidate = stdPath + "/" + aluFile;
-        if (fileExists(candidate)) {
-            return candidate;
-        }
-    }
-    
-    // 2. Try std path as parent (std::fs -> stdPath/../std/fs.alu is same as #1, 
-    //    but also handle if stdPath itself IS the std dir)
-    //    Actually just try relative to the source file directory
-    {
-        std::string candidate = sourceDir + "/" + aluFile;
-        if (fileExists(candidate)) {
-            return candidate;
-        }
-    }
-    
-    // 3. Try alu_modules/ directory
-    {
-        std::string candidate = "alu_modules/" + aluFile;
-        if (fileExists(candidate)) {
-            return candidate;
-        }
-    }
-    
-    // 4. Try alu_modules/pkg/pkg.alu pattern (last segment as both dir and file)
-    {
-        size_t lastSlash = relPath.find_last_of('/');
-        std::string lastSegment = (lastSlash != std::string::npos) 
-            ? relPath.substr(lastSlash + 1) : relPath;
-        std::string candidate = "alu_modules/" + relPath + "/" + lastSegment + ".alu";
-        if (fileExists(candidate)) {
-            return candidate;
-        }
-    }
-    
-    // Nothing found, return the .alu path anyway — the driver will report the error
-    return aluFile;
-}
+// Module Linking is now handled by ModuleLinker (linker.h)
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -100,13 +21,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    std::vector<std::string> inputFiles;
     std::string command = "build";
-    std::string target = "";
     std::string targetTriple = "";
     bool createXcframework = false;
     std::string ndkPath = "";
     std::string jniPackage = "com.example.alu";
     std::string stdPath = ""; // Will be auto-detected if not set
+    bool emit_debug_info = false;
     
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -120,16 +42,24 @@ int main(int argc, char* argv[]) {
             jniPackage = argv[++i];
         } else if (arg == "--std-path" && i + 1 < argc) {
             stdPath = argv[++i];
+        } else if (arg == "-g" || arg == "--debug") {
+            emit_debug_info = true;
         } else if (i == 1 && (arg == "install" || arg == "build")) {
             command = arg;
         } else {
-            target = arg;
+            inputFiles.push_back(arg);
         }
     }
     
+    // Check if a file exists and can be opened for reading
+    auto fileExists = [](const std::string& path) {
+        std::ifstream f(path);
+        return f.good();
+    };
+
     // Auto-detect std library path: try relative to the compiler executable's directory
     if (stdPath.empty()) {
-        std::string exeDir = getDirectory(argv[0]);
+        std::string exeDir = ModuleLinker::getDirectory(argv[0]);
         if (fileExists(exeDir + "/std/io.alu")) {
             stdPath = exeDir;
         } else if (fileExists(exeDir + "/../std/io.alu")) {
@@ -148,10 +78,11 @@ int main(int argc, char* argv[]) {
 
     // XCFramework logic
     if (createXcframework) {
-        if (target.empty()) {
+        if (inputFiles.empty()) {
             std::cerr << "Usage: alu_cxx build <file.alu> --create-xcframework" << std::endl;
             return 1;
         }
+        std::string target = inputFiles[0];
         std::string baseFilename = target.substr(0, target.find_last_of("."));
         std::cout << "[ALU CXX] Creating XCFramework for " << baseFilename << "..." << std::endl;
         
@@ -190,10 +121,11 @@ int main(int argc, char* argv[]) {
     }
 
     if (command == "install") {
-        if (target.empty()) {
+        if (inputFiles.empty()) {
             std::cerr << "Usage: alu_cxx install <user/repo>" << std::endl;
             return 1;
         }
+        std::string target = inputFiles[0];
         std::string url = "https://github.com/" + target;
         std::string repo_name = target;
         size_t slash_pos = target.find('/');
@@ -212,106 +144,65 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    std::string filename = target;
-    if (filename.empty()) {
+    if (inputFiles.empty()) {
         std::cerr << "Error: No input file specified." << std::endl;
         return 1;
     }
 
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Error: Could not open file " << filename << std::endl;
-        return 1;
-    }
+    auto ast = std::make_unique<ProgramNode>();
+    ModuleLinker linker(stdPath);
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string source = buffer.str();
-
-    std::cout << "[ALU CXX] Compiling: " << filename << std::endl;
-    std::cout << "[ALU CXX] Lexical Analysis (Scanning)..." << std::endl;
-    
-    Lexer lexer(source);
-    std::vector<Token> tokens = lexer.tokenize();
-    
-    std::cout << "[ALU CXX] Syntactic Analysis (Parsing)..." << std::endl;
-    
-    Parser parser(tokens);
-    try {
-        std::unique_ptr<ProgramNode> ast = parser.parse();
-        
-        // Resolve imports (supports both legacy and module-path styles)
-        std::string sourceDir = getDirectory(filename);
-        bool hasImports = true;
-        std::unordered_set<std::string> imported_files;
-        while (hasImports) {
-            hasImports = false;
-            for (auto it = ast->declarations.begin(); it != ast->declarations.end(); ++it) {
-                if (auto importNode = dynamic_cast<ImportNode*>(it->get())) {
-                    // Resolve the module path
-                    std::string resolvedPath = resolveModulePath(
-                        importNode->moduleName, importNode->isModulePath, sourceDir, stdPath);
-                    
-                    // Remove ImportNode from AST
-                    ast->declarations.erase(it); 
-                    
-                    // Skip already-imported files (deduplication)
-                    if (imported_files.find(resolvedPath) != imported_files.end()) {
-                        hasImports = true;
-                        break;
-                    }
-                    imported_files.insert(resolvedPath);
-                    
-                    // Open the resolved file
-                    std::ifstream mf(resolvedPath);
-                    if (!mf.is_open() && !importNode->isModulePath) {
-                        // Legacy fallback: try alu_modules/ paths
-                        std::string modFile = importNode->moduleName;
-                        std::string modulePath = "alu_modules/" + modFile;
-                        mf.open(modulePath);
-                        if (!mf.is_open()) {
-                            modulePath = "alu_modules/" + modFile + "/" + modFile + ".alu";
-                            mf.open(modulePath);
-                        }
-                    }
-                    
-                    if (!mf.is_open()) {
-                        std::string errMsg = "Cannot open imported module: " + importNode->moduleName;
-                        if (importNode->isModulePath) {
-                            errMsg += "\n  Searched: " + stdPath + "/" + resolvedPath;
-                            errMsg += "\n  Searched: " + sourceDir + "/" + resolvedPath;
-                            errMsg += "\n  Searched: alu_modules/" + resolvedPath;
-                        }
-                        throw std::runtime_error(errMsg);
-                    }
-                    
-                    std::cout << "[ALU CXX] Importing module: " << importNode->moduleName 
-                              << " -> " << resolvedPath << std::endl;
-                    std::stringstream mb; mb << mf.rdbuf();
-                    Lexer ml(mb.str());
-                    Parser mp(ml.tokenize());
-                    auto mAst = mp.parse();
-                    
-                    // Insert all declarations from mAst into ast
-                    for (auto& decl : mAst->declarations) {
-                        ast->declarations.push_back(std::move(decl));
-                    }
-                    hasImports = true;
-                    break; // iterator invalidated
-                }
-            }
+    for (const auto& filename : inputFiles) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Error: Could not open file " << filename << std::endl;
+            return 1;
         }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string source = buffer.str();
+
+        std::cout << "[ALU CXX] Compiling: " << filename << std::endl;
+        std::cout << "[ALU CXX] Lexical Analysis (Scanning)..." << std::endl;
+        
+        Lexer lexer(source);
+        std::vector<Token> tokens = lexer.tokenize();
+        
+        std::cout << "[ALU CXX] Syntactic Analysis (Parsing)..." << std::endl;
+        
+        Parser parser(tokens, filename);
+        try {
+            std::unique_ptr<ProgramNode> fileAst = parser.parse();
+            
+            // Resolve imports using ModuleLinker
+            std::string sourceDir = ModuleLinker::getDirectory(filename);
+            linker.link(fileAst.get(), sourceDir, filename);
+
+            for (auto& decl : fileAst->declarations) {
+                ast->declarations.push_back(std::move(decl));
+            }
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << std::endl;
+            return 1;
+        }
+    }
         
         std::cout << "[ALU CXX] Abstract Syntax Tree generated successfully:" << std::endl;
         std::cout << "==================================================" << std::endl;
         ast->print();
         std::cout << "==================================================" << std::endl;
         
-        SemanticAnalyzer semanticAnalyzer;
-        semanticAnalyzer.analyze(ast.get());
-        
-        Z3Verifier z3Verifier;
-        z3Verifier.verify(ast.get());
+        try {
+            SemanticAnalyzer semanticAnalyzer;
+            semanticAnalyzer.analyze(ast.get());
+            
+            Z3Verifier z3Verifier;
+            z3Verifier.verify(ast.get());
+        } catch (const std::exception& e) {
+            std::cerr << e.what() << std::endl;
+            return 1;
+        }
         
         std::cout << "[ALU CXX] Ready for LLVM IR Translation." << std::endl;
         
@@ -321,9 +212,10 @@ int main(int argc, char* argv[]) {
         if (targetMetal) targetArchStr = "metal";
         
         LLVMCodeGen codegen(targetArchStr);
+        codegen.emit_debug_info = emit_debug_info;
         ast->codegen(codegen);
-        
-        std::string outFilename = filename + ".ll";
+        std::string mainFile = inputFiles[0];
+        std::string outFilename = mainFile + ".ll";
         codegen.saveToFile(outFilename);
         
         std::cout << "==================================================" << std::endl;
@@ -427,7 +319,7 @@ int main(int argc, char* argv[]) {
         std::cout << "[ALU CXX] Invoking LLVM Backend (clang) to assemble and link..." << std::endl;
         
         // Strip the .alu extension and add .exe, .so, or .js
-        std::string baseFilename = filename.substr(0, filename.find_last_of("."));
+        std::string baseFilename = mainFile.substr(0, mainFile.find_last_of("."));
         std::string outBinFilename = baseFilename;
         
         if (targetAndroid) outBinFilename += ".so";
@@ -467,7 +359,8 @@ int main(int argc, char* argv[]) {
             std::string objFile = baseFilename + "-" + arch + "-sim.o";
             compileCommand = "clang -x ir " + outFilename + " std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
         } else {
-            compileCommand = "clang++ -O3 -o " + outBinFilename + " " + outFilename + " std/fs_backend.cpp std/net_backend.cpp std/crypto_backend.cpp std/image_backend.cpp -lws2_32";
+            std::string opt_flag = emit_debug_info ? "-O0 -g" : "-O3";
+            compileCommand = "clang++ " + opt_flag + " -o " + outBinFilename + " " + outFilename + " std/fs_backend.cpp std/net_backend.cpp std/crypto_backend.cpp std/image_backend.cpp -lws2_32";
         }
         
         int result = std::system(compileCommand.c_str());
@@ -479,10 +372,5 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
-    } catch (const std::exception& e) {
-        std::cerr << "\n[COMPILER ERROR] " << e.what() << std::endl;
-        return 1;
-    }
-
     return 0;
 }

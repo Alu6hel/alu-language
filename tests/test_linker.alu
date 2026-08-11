@@ -1,0 +1,9 @@
+import "test_linker_2.alu";
+
+routine foo() -> int {
+    return bar() + 1;
+}
+
+routine main() -> int {
+    return foo();
+}

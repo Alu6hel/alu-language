@@ -24,13 +24,36 @@ extern "C" {
         return (void*)(header + 1);
     }
     
+    void* __alu_alloc_internal(int32_t size) {
+        return alu_alloc((size_t)size);
+    }
+    
+    bool safe_read(void* ptr, size_t size) {
+#ifdef _WIN32
+        NT_TIB* tib = (NT_TIB*)NtCurrentTeb();
+        // If the pointer falls within the current thread's stack, it's definitely not an ARC pointer on the heap!
+        // We include a buffer to safely catch addresses in the guard page just below StackLimit.
+        if (ptr >= (void*)((char*)tib->StackLimit - 4096) && ptr < tib->StackBase) {
+            return false;
+        }
+
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0) return false;
+        if (mbi.State != MEM_COMMIT) return false;
+        if (mbi.Protect & PAGE_NOACCESS) return false;
+        if (mbi.Protect & PAGE_GUARD) return false;
+        return true;
+#else
+        return true; // Simplified for non-Windows
+#endif
+    }
+
     void* alu_realloc(void* ptr, size_t new_size) {
         if (!ptr) return alu_alloc(new_size);
         ARCHeader* old_header = (ARCHeader*)ptr - 1;
         
-#ifdef _WIN32
-        if (IsBadReadPtr(old_header, sizeof(ARCHeader))) return realloc(ptr, new_size);
-#endif
+        if (!safe_read(old_header, sizeof(ARCHeader))) return realloc(ptr, new_size);
+        
 
         if (old_header->magic != ARC_MAGIC) {
             // Not ARC managed, just fallback (shouldn't happen in pure Alu)
@@ -46,9 +69,8 @@ extern "C" {
         if (!ptr) return;
         ARCHeader* header = (ARCHeader*)ptr - 1;
 
-#ifdef _WIN32
-        if (IsBadReadPtr(header, sizeof(ARCHeader))) return;
-#endif
+        if (!safe_read(header, sizeof(ARCHeader))) return;
+
 
         if (header->magic == ARC_MAGIC) {
             header->ref_count++;
@@ -59,9 +81,8 @@ extern "C" {
         if (!ptr) return;
         ARCHeader* header = (ARCHeader*)ptr - 1;
 
-#ifdef _WIN32
-        if (IsBadReadPtr(header, sizeof(ARCHeader))) return;
-#endif
+        if (!safe_read(header, sizeof(ARCHeader))) return;
+
 
         if (header->magic == ARC_MAGIC) {
             header->ref_count--;

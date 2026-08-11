@@ -8,13 +8,9 @@ import * as path from 'path';
 let client: LanguageClient;
 
 export function activate(context: vscode.ExtensionContext) {
-    const serverModule = context.asAbsolutePath(path.join('out', 'server.js'));
     const serverOptions: ServerOptions = {
-        run: { module: serverModule, transport: vscode.TransportKind.ipc },
-        debug: {
-            module: serverModule,
-            transport: vscode.TransportKind.ipc,
-        }
+        run: { command: "C:\\\\Users\\\\Alu\\\\source\\\\repos\\\\Alu6hel\\\\alu-language\\\\cpp_frontend\\\\alu-lsp.exe" },
+        debug: { command: "C:\\\\Users\\\\Alu\\\\source\\\\repos\\\\Alu6hel\\\\alu-language\\\\cpp_frontend\\\\alu-lsp.exe" }
     };
 
     const clientOptions: LanguageClientOptions = {

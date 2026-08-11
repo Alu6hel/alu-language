@@ -1,0 +1,9 @@
+routine my_math(int a, int b) -> int {
+    int c = a + b;
+    return c;
+}
+
+routine main() -> int {
+    int res = my_math(10, 20);
+    return res;
+}

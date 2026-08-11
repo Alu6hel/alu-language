@@ -1,8 +1,20 @@
 #pragma once
 #include <string>
+#include <map>
 #include <vector>
 #include <memory>
+#include <regex>
 #include <iostream>
+
+inline std::string replaceTypeVars(std::string typeStr, const std::map<std::string, std::string>& type_map) {
+    if (type_map.count(typeStr)) return type_map.at(typeStr);
+    std::string result = typeStr;
+    for (const auto& kv : type_map) {
+        std::regex re("\\b" + kv.first + "\\b");
+        result = std::regex_replace(result, re, kv.second);
+    }
+    return result;
+}
 
 enum class DataType {
     UNKNOWN,
@@ -37,9 +49,14 @@ class LLVMCodeGen;
 // Base AST Node
 class ASTNode {
 public:
+    int line = 0;
+    int col = 0;
+    std::string file = "";
+    
     virtual ~ASTNode() = default;
     virtual void print(int indent = 0) const = 0;
     virtual void codegen(LLVMCodeGen& cg) = 0;
+    virtual std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const = 0;
 };
 
 // Inline Assembly Call: asm("...");
@@ -51,6 +68,9 @@ public:
         std::cout << std::string(indent, ' ') << "[AsmCall] -> " << instruction << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<AsmCallNode>(instruction);
+    }
 };
 
 // Unsafe Block: unsafe { ... }
@@ -64,6 +84,9 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<UnsafeBlockNode>(); for (const auto& s : body) n->body.push_back(s->clone(type_map)); return n;
+    }
 };
 
 // Literal Node (e.g., 5 or "hello")
@@ -76,6 +99,9 @@ public:
         std::cout << std::string(indent, ' ') << "[Literal] " << value << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<LiteralNode>(type, value);
+    }
 };
 
 // Binary Operation Node (e.g., +)
@@ -92,6 +118,9 @@ public:
         right->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<BinOpNode>(op, left->clone(type_map), right->clone(type_map));
+    }
 };
 
 // Variable Declaration Node: int x = 5;
@@ -107,6 +136,9 @@ public:
         if (initializer) initializer->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<VarDeclNode>(replaceTypeVars(varType, type_map), name, initializer ? initializer->clone(type_map) : nullptr);
+    }
 };
 
 class ThrowNode : public ASTNode {
@@ -119,6 +151,9 @@ public:
         expr->print(indent + 2);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ThrowNode>(expr->clone(type_map));
+    }
 };
 
 class TryCatchNode : public ASTNode {
@@ -141,6 +176,9 @@ public:
         for (const auto& stmt : catch_body) stmt->print(indent + 2);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::vector<std::unique_ptr<ASTNode>> t_body; for(auto& s: try_body) t_body.push_back(s->clone(type_map)); std::vector<std::unique_ptr<ASTNode>> c_body; for(auto& s: catch_body) c_body.push_back(s->clone(type_map)); return std::make_unique<TryCatchNode>(std::move(t_body), replaceTypeVars(catch_var_type, type_map), catch_var_name, std::move(c_body));
+    }
 };
 
 class CastNode : public ASTNode {
@@ -155,6 +193,9 @@ public:
         expr->print(indent + 2);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<CastNode>(targetType, expr->clone(type_map));
+    }
 };
 
 class FreeNode : public ASTNode {
@@ -166,6 +207,9 @@ public:
         expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<FreeNode>(expr->clone(type_map));
+    }
 };
 
 // Variable Assignment Node
@@ -179,6 +223,9 @@ public:
         expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<VarAssignNode>(name, expr->clone(type_map));
+    }
 };
 
 // If Node
@@ -199,6 +246,9 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<IfNode>(condition->clone(type_map)); for(auto& s: then_body) n->then_body.push_back(s->clone(type_map)); for(auto& s: else_body) n->else_body.push_back(s->clone(type_map)); return n;
+    }
 };
 
 // While Node
@@ -214,6 +264,9 @@ public:
         for (const auto& stmt : body) stmt->print(indent + 6);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<WhileNode>(condition->clone(type_map)); for(auto& s: body) n->body.push_back(s->clone(type_map)); return n;
+    }
 };
 
 // For Node: for (init; cond; update) { body }
@@ -234,6 +287,9 @@ public:
         for (const auto& stmt : body) stmt->print(indent + 6);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<ForNode>(init ? init->clone(type_map) : nullptr, condition ? condition->clone(type_map) : nullptr, update ? update->clone(type_map) : nullptr); for(auto& s: body) n->body.push_back(s->clone(type_map)); return n;
+    }
 };
 
 // Return Node
@@ -246,6 +302,24 @@ public:
         if (expr) expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ReturnNode>(expr ? expr->clone(type_map) : nullptr);
+    }
+};
+
+// Assert Node
+class AssertNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> condition;
+    AssertNode(std::unique_ptr<ASTNode> cond) : condition(std::move(cond)) {}
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[Assert]" << std::endl;
+        if (condition) condition->print(indent + 4);
+    }
+    void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<AssertNode>(condition ? condition->clone(type_map) : nullptr);
+    }
 };
 
 // Effect Declaration Node
@@ -259,6 +333,9 @@ public:
         for (const auto& m : methods) m->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<EffectDeclNode>(name); for(auto& s: methods) n->methods.push_back(s->clone(type_map)); return n;
+    }
 };
 
 // Yield Node
@@ -266,6 +343,7 @@ class YieldNode : public ASTNode {
 public:
     std::string effect_name;
     std::string method_name;
+    std::vector<std::string> type_args;
     std::vector<std::unique_ptr<ASTNode>> args;
     YieldNode(std::string en, std::string mn) : effect_name(en), method_name(mn) {}
     void print(int indent = 0) const override {
@@ -273,6 +351,9 @@ public:
         for (const auto& a : args) a->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<YieldNode>(effect_name, method_name); for(auto& a: args) n->args.push_back(a->clone(type_map)); return n;
+    }
 };
 
 // Resume Node
@@ -285,6 +366,9 @@ public:
         if (expr) expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ResumeNode>(expr ? expr->clone(type_map) : nullptr);
+    }
 };
 
 // Handle Node
@@ -305,12 +389,16 @@ public:
         if (in_call) in_call->print(indent + 6);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<HandleNode>(effect_name); n->handler_method = handler_method; n->handler_args = handler_args; for(auto& s: handler_body) n->handler_body.push_back(s->clone(type_map)); if(in_call) n->in_call = in_call->clone(type_map); return n;
+    }
 };
 
 // Function Call Node
 class FuncCallNode : public ASTNode {
 public:
     std::string name;
+    std::vector<std::string> type_args;
     std::vector<std::unique_ptr<ASTNode>> args;
     FuncCallNode(std::string n, std::vector<std::unique_ptr<ASTNode>> a) : name(n), args(std::move(a)) {}
     void print(int indent = 0) const override {
@@ -318,6 +406,9 @@ public:
         for (const auto& a : args) a->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::vector<std::unique_ptr<ASTNode>> a; for(auto& x: args) a.push_back(x->clone(type_map)); auto n = std::make_unique<FuncCallNode>(name, std::move(a)); n->type_args = type_args; return n;
+    }
 };
 
 // Parameter Struct
@@ -368,6 +459,9 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::vector<StructField> f; for(auto& x: fields) f.push_back({replaceTypeVars(x.type, type_map), x.name}); auto n = std::make_unique<StructDefNode>(name, type_params, f, isExported); for(auto& x: requires_annotations) n->requires_annotations.push_back(x->clone(type_map)); for(auto& x: ensures_annotations) n->ensures_annotations.push_back(x->clone(type_map)); return n;
+    }
 };
 
 // Member Access Node: p.x
@@ -380,6 +474,9 @@ public:
         std::cout << std::string(indent, ' ') << "[MemberAccess] " << objectName << "." << fieldName << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<MemberAccessNode>(objectName, fieldName);
+    }
 };
 
 // Member Assignment Node: p.x = 5;
@@ -395,6 +492,9 @@ public:
         expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<MemberAssignNode>(objectName, fieldName, expr->clone(type_map));
+    }
 };
 
 // Extern Routine Declaration Node
@@ -431,6 +531,9 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::vector<Parameter> p; for(auto& x: params) p.push_back({replaceTypeVars(x.type, type_map), x.name}); auto n = std::make_unique<ExternRoutineNode>(name, p, isVariadic, replaceTypeVars(returnType, type_map)); for(auto& x: requires_annotations) n->requires_annotations.push_back(x->clone(type_map)); for(auto& x: ensures_annotations) n->ensures_annotations.push_back(x->clone(type_map)); return n;
+    }
 };
 
 struct Receiver {
@@ -445,6 +548,7 @@ public:
     std::string name;
     std::vector<Parameter> params;
     std::string returnType;
+    std::vector<std::string> type_params;
     std::vector<std::unique_ptr<ASTNode>> body;
     std::optional<Receiver> receiver;
     bool isExported = false;
@@ -479,6 +583,9 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::optional<Receiver> rec = receiver; if (rec) { rec->type = replaceTypeVars(rec->type, type_map); } auto n = std::make_unique<RoutineNode>(name, rec, isExported); for(auto& x: params) n->params.push_back({replaceTypeVars(x.type, type_map), x.name}); n->returnType = replaceTypeVars(returnType, type_map); for(auto& s: body) n->body.push_back(s->clone(type_map)); for(auto& x: requires_annotations) n->requires_annotations.push_back(x->clone(type_map)); for(auto& x: ensures_annotations) n->ensures_annotations.push_back(x->clone(type_map)); n->type_params = type_params; return n;
+    }
 };
 
 // Variable Access Node
@@ -490,6 +597,9 @@ public:
         std::cout << std::string(indent, ' ') << "[VarAccess] " << name << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<VarAccessNode>(name);
+    }
 };
 
 // Pointer/Memory Nodes
@@ -502,6 +612,9 @@ public:
         expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<AddressOfNode>(expr->clone(type_map));
+    }
 };
 
 class DereferenceNode : public ASTNode {
@@ -513,6 +626,9 @@ public:
         expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<DereferenceNode>(expr->clone(type_map));
+    }
 };
 
 class DerefAssignNode : public ASTNode {
@@ -526,6 +642,9 @@ public:
         val_expr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<DerefAssignNode>(ptr_expr->clone(type_map), val_expr->clone(type_map));
+    }
 };
 
 class NewAllocationNode : public ASTNode {
@@ -536,6 +655,9 @@ public:
         std::cout << std::string(indent, ' ') << "[New] " << typeName << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<NewAllocationNode>(replaceTypeVars(typeName, type_map));
+    }
 };
 
 // Array Nodes
@@ -551,6 +673,9 @@ public:
         std::cout << std::string(indent, ' ') << "]" << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ArrayDeclNode>(replaceTypeVars(type, type_map), name, sizeExpr->clone(type_map));
+    }
 };
 
 class ArrayIndexNode : public ASTNode {
@@ -566,6 +691,9 @@ public:
         std::cout << std::string(indent, ' ') << "]" << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ArrayIndexNode>(arrayExpr->clone(type_map), indexExpr->clone(type_map));
+    }
 };
 
 class ArrayAssignNode : public ASTNode {
@@ -584,6 +712,9 @@ public:
         valExpr->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ArrayAssignNode>(arrayExpr->clone(type_map), indexExpr->clone(type_map), valExpr->clone(type_map));
+    }
 };
 
 // Program Root Node
@@ -592,6 +723,7 @@ class MethodCallNode : public ASTNode {
 public:
     std::unique_ptr<ASTNode> object;
     std::string methodName;
+    std::vector<std::string> type_args;
     std::vector<std::unique_ptr<ASTNode>> args;
     MethodCallNode(std::unique_ptr<ASTNode> obj, std::string name, std::vector<std::unique_ptr<ASTNode>> a) 
         : object(std::move(obj)), methodName(name), args(std::move(a)) {}
@@ -601,6 +733,9 @@ public:
         for (const auto& a : args) a->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::vector<std::unique_ptr<ASTNode>> a; for(auto& x: args) a.push_back(x->clone(type_map)); return std::make_unique<MethodCallNode>(object ? object->clone(type_map) : nullptr, methodName, std::move(a));
+    }
 };
 
 // Import Node
@@ -608,12 +743,18 @@ class ImportNode : public ASTNode {
 public:
     std::string moduleName;
     bool isModulePath = false; // true for `import std::fs;`, false for `import "file.alu";`
-    ImportNode(std::string name, bool modPath = false) : moduleName(name), isModulePath(modPath) {}
+    std::string alias; // alias for namespace wrapping, e.g. `import "file.alu" as f;`
+    ImportNode(std::string name, bool modPath = false, std::string aliasName = "") 
+        : moduleName(name), isModulePath(modPath), alias(aliasName) {}
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[Import] " << moduleName
-                  << (isModulePath ? " (module)" : " (file)") << std::endl;
+                  << (isModulePath ? " (module)" : " (file)") 
+                  << (alias.empty() ? "" : " as " + alias) << std::endl;
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        return std::make_unique<ImportNode>(moduleName, isModulePath, alias);
+    }
 };
 
 // Namespace Node
@@ -629,6 +770,9 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<NamespaceNode>(name); for(auto& s: declarations) n->declarations.push_back(s->clone(type_map)); return n;
+    }
 };
 
 class ProgramNode : public ASTNode {
@@ -641,4 +785,7 @@ public:
         }
     }
     void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        auto n = std::make_unique<ProgramNode>(); for(auto& s: declarations) n->declarations.push_back(s->clone(type_map)); return n;
+    }
 };

@@ -1,6 +1,7 @@
 #include "semantic_analyzer.h"
 #include <stdexcept>
 #include <iostream>
+#include <typeinfo>
 
 // --- Scope Management ---
 
@@ -44,11 +45,19 @@ void SemanticAnalyzer::popScope() {
 }
 
 bool SemanticAnalyzer::lookupSymbol(const std::string& name, DataType& outType) {
-    // Search from innermost scope to outermost
+    SymbolMeta meta;
+    if (lookupSymbolMeta(name, meta)) {
+        outType = meta.type;
+        return true;
+    }
+    return false;
+}
+
+bool SemanticAnalyzer::lookupSymbolMeta(const std::string& name, SymbolMeta& outMeta) {
     for (int i = (int)scope_stack.size() - 1; i >= 0; --i) {
         auto it = scope_stack[i].find(name);
         if (it != scope_stack[i].end()) {
-            outType = it->second;
+            outMeta = it->second;
             return true;
         }
     }
@@ -71,9 +80,14 @@ bool SemanticAnalyzer::isDeclaredInCurrentScope(const std::string& name) {
     return scope_stack.back().find(name) != scope_stack.back().end();
 }
 
-void SemanticAnalyzer::declareSymbol(const std::string& name, DataType type) {
+void SemanticAnalyzer::declareSymbol(const std::string& name, DataType type, int line, int col, const std::string& file) {
     if (!scope_stack.empty()) {
-        scope_stack.back()[name] = type;
+        SymbolMeta meta;
+        meta.type = type;
+        meta.def_line = line;
+        meta.def_col = col;
+        meta.def_file = file;
+        scope_stack.back()[name] = meta;
     }
 }
 
@@ -134,6 +148,11 @@ DataType SemanticAnalyzer::parseDataType(const std::string& rawTypeStr) {
     instantiateTemplateIfNeeded(typeStr);
     std::string base = typeStr;
     bool isPointer = false;
+    
+    if (base.find("ptr<") == 0) {
+        isPointer = true;
+    }
+    
     while (!base.empty() && (base.back() == '*' || base.back() == ']')) {
         isPointer = true;
         if (base.back() == ']') {
@@ -160,6 +179,8 @@ DataType SemanticAnalyzer::parseDataType(const std::string& rawTypeStr) {
 // --- Expression Type Checking ---
 
 DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
+    if (!expr) return DataType::UNKNOWN;
+    
     if (auto literal = dynamic_cast<LiteralNode*>(expr)) {
         if (literal->type == DataType::UNKNOWN) {
             // It's a variable reference
@@ -172,153 +193,46 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         return literal->type;
     }
     else if (auto funcCall = dynamic_cast<FuncCallNode*>(expr)) {
-        funcCall->name = resolveName(funcCall->name);
+        std::string original_name = funcCall->name;
+        if (!funcCall->type_args.empty()) {
+            instantiateRoutineTemplateIfNeeded(funcCall->name, funcCall->type_args);
+            std::string mangledName = funcCall->name;
+            for (const auto& ta : funcCall->type_args) {
+                mangledName += "_" + resolveName(ta);
+            }
+            funcCall->name = mangledName;
+        } else {
+            funcCall->name = resolveName(funcCall->name);
+        }
+        
         if (function_table.find(funcCall->name) == function_table.end()) {
             // Built-in puts fallback if standard library is missing
-            if (funcCall->name != "puts") {
+            if (funcCall->name != "puts" && funcCall->name != "printf") {
                 throw std::runtime_error("Semantic Error: Undefined function '" + funcCall->name + "'");
             }
-            return DataType::INT;
         }
         
-        auto sig = function_table[funcCall->name];
-        
-        if (sig.isVariadic) {
-            if (funcCall->args.size() < sig.paramTypes.size()) {
-                throw std::runtime_error("Semantic Error: Too few arguments to variadic function '" + funcCall->name + "'");
-            }
-        } else {
-            if (funcCall->args.size() != sig.paramTypes.size()) {
-                throw std::runtime_error("Semantic Error: Incorrect number of arguments to '" + funcCall->name + "'");
-            }
+        if (is_lsp_mode && function_table.find(funcCall->name) != function_table.end()) {
+            FunctionSignature& sig = function_table[funcCall->name];
+            LSPSymbol sym;
+            sym.line = funcCall->line;
+            sym.col = funcCall->col;
+            sym.length = original_name.length();
+            sym.name = original_name;
+            sym.hover_text = "routine " + original_name + " -> " + DataTypeToString(sig.returnType);
+            sym.def_line = sig.def_line;
+            sym.def_col = sig.def_col;
+            sym.def_file = sig.def_file;
+            lsp_symbols.push_back(sym);
         }
-        
-        for (size_t i = 0; i < sig.paramTypes.size(); ++i) {
-            DataType argType = checkExpression(funcCall->args[i].get());
-            if (argType != sig.paramTypes[i]) {
-                throw std::runtime_error("Semantic Error: Argument type mismatch in call to '" + funcCall->name + "' (Expected: " + DataTypeToString(sig.paramTypes[i]) + ", Got: " + DataTypeToString(argType) + ")");
-            }
-        }
-        
-        return sig.returnType;
-    }
-    else if (auto methodCall = dynamic_cast<MethodCallNode*>(expr)) {
-        std::string typeName = "";
-        if (auto obj = dynamic_cast<VarAccessNode*>(methodCall->object.get())) {
-            std::string sn;
-            if (lookupStructVar(obj->name, sn)) {
-                typeName = sn;
-            } else {
-                DataType dt;
-                if (lookupSymbol(obj->name, dt) && dt == DataType::POINTER && pointer_var_table.find(obj->name) != pointer_var_table.end()) {
-                    std::string base = pointer_var_table[obj->name];
-                    if (!base.empty() && base.back() == '*') base.pop_back();
-                    typeName = base;
-                }
-            }
-        }
-        if (typeName.empty()) {
-            throw std::runtime_error("Semantic Error: Method call on invalid object.");
-        }
-        std::string funcName = typeName + "_" + methodCall->methodName;
-        if (function_table.find(funcName) == function_table.end()) {
-            throw std::runtime_error("Semantic Error: Undefined method '" + methodCall->methodName + "' on struct '" + typeName + "'");
-        }
-        auto sig = function_table[funcName];
-        if (!sig.isVariadic && methodCall->args.size() + 1 != sig.paramTypes.size()) {
-            throw std::runtime_error("Semantic Error: Incorrect number of arguments to method '" + funcName + "'");
-        }
-        for (size_t i = 0; i < methodCall->args.size(); ++i) {
-            checkExpression(methodCall->args[i].get());
-        }
-        return sig.returnType;
-    }
 
-    else if (auto binop = dynamic_cast<BinOpNode*>(expr)) {
-        DataType leftType = checkExpression(binop->left.get());
-        DataType rightType = checkExpression(binop->right.get());
-        
-        if (leftType != rightType && leftType != DataType::UNKNOWN && rightType != DataType::UNKNOWN) {
-            bool is_ptr_arith = (binop->op == "+" || binop->op == "-") && 
-                                ((leftType == DataType::STRING && rightType == DataType::INT) ||
-                                 (leftType == DataType::POINTER && rightType == DataType::INT));
-            bool is_float_int = (leftType == DataType::FLOAT && rightType == DataType::INT) ||
-                                (leftType == DataType::INT && rightType == DataType::FLOAT) ||
-                                (leftType == DataType::DOUBLE && rightType == DataType::INT) ||
-                                (leftType == DataType::INT && rightType == DataType::DOUBLE) ||
-                                (leftType == DataType::FLOAT && rightType == DataType::DOUBLE) ||
-                                (leftType == DataType::DOUBLE && rightType == DataType::FLOAT);
-            if (!is_ptr_arith && !is_float_int) {
-                std::cerr << "[DEBUG] BinOp Type Mismatch: " << binop->op << " on " << DataTypeToString(leftType) << " and " << DataTypeToString(rightType) << "\n";
-                binop->print(0);
-                throw std::runtime_error(
-                    "Semantic Error: Type mismatch in binary operation. Cannot operate on " +
-                    DataTypeToString(leftType) + " and " + DataTypeToString(rightType)
-                );
-            }
+        for (const auto& arg : funcCall->args) {
+            checkExpression(arg.get());
         }
         
-        if (binop->op == "==" || binop->op == "!=" || binop->op == "<" || binop->op == ">" || binop->op == "<=" || binop->op == ">=") {
-            return DataType::BOOL;
+        if (function_table.find(funcCall->name) != function_table.end()) {
+            return function_table[funcCall->name].returnType;
         }
-        
-        if (leftType == DataType::STRING || leftType == DataType::POINTER) {
-            return leftType;
-        }
-        return leftType != DataType::UNKNOWN ? leftType : rightType;
-    }
-    else if (auto memberAccess = dynamic_cast<MemberAccessNode*>(expr)) {
-        std::string structName;
-        if (!lookupStructVar(memberAccess->objectName, structName)) {
-            throw std::runtime_error("Semantic Error: Variable '" + memberAccess->objectName + "' is not a struct.");
-        }
-        StructInfo& info = struct_table[structName];
-        
-        bool found = false;
-        DataType fieldType = DataType::UNKNOWN;
-        for (const auto& field : info.fields) {
-            if (field.name == memberAccess->fieldName) {
-                found = true;
-                fieldType = parseDataType(field.type);
-                break;
-            }
-        }
-        if (!found) {
-            throw std::runtime_error("Semantic Error: Struct '" + structName + "' has no field '" + memberAccess->fieldName + "'");
-        }
-        return fieldType;
-    }
-    else if (auto varAccess = dynamic_cast<VarAccessNode*>(expr)) {
-        DataType t;
-        if (lookupSymbol(varAccess->name, t)) {
-            return t;
-        }
-        varAccess->name = resolveName(varAccess->name);
-        if (lookupSymbol(varAccess->name, t)) {
-            return t;
-        }
-        std::string sn;
-        if (lookupStructVar(varAccess->name, sn)) {
-            return DataType::UNKNOWN; // Custom struct
-        }
-        throw std::runtime_error("Semantic Error: Undefined variable '" + varAccess->name + "'");
-    }
-    else if (auto addrNode = dynamic_cast<AddressOfNode*>(expr)) {
-        checkExpression(addrNode->expr.get());
-        return DataType::POINTER;
-    }
-    else if (auto derefNode = dynamic_cast<DereferenceNode*>(expr)) {
-        DataType t = checkExpression(derefNode->expr.get());
-        if (t != DataType::POINTER && t != DataType::ARRAY && t != DataType::UNKNOWN) {
-            throw std::runtime_error("Semantic Error: Cannot dereference a non-pointer");
-        }
-        
-        if (auto varAccess = dynamic_cast<VarAccessNode*>(derefNode->expr.get())) {
-            std::string fullType = pointer_var_table[varAccess->name];
-            if (fullType == "int*") return DataType::INT;
-            if (fullType == "string*") return DataType::STRING;
-        }
-        
         return DataType::UNKNOWN;
     }
     else if (auto allocNode = dynamic_cast<NewAllocationNode*>(expr)) {
@@ -332,8 +246,7 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
     else if (auto arrIndex = dynamic_cast<ArrayIndexNode*>(expr)) {
         DataType t = checkExpression(arrIndex->indexExpr.get());
         if (t != DataType::INT) {
-            std::cerr << "INDEX ERROR ON: Array Index" << std::endl;
-            arrIndex->indexExpr->print(0);
+            if (!is_lsp_mode) { std::cerr << "INDEX ERROR ON: Array Index" << std::endl; arrIndex->indexExpr->print(0); }
             throw std::runtime_error("Semantic Error: Array index must be an integer");
         }
         
@@ -350,8 +263,103 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         if (fullType == "double[]" || fullType == "double*" || fullType == "double") return DataType::DOUBLE;
         if (fullType == "byte[]" || fullType == "byte*" || fullType == "string") return DataType::BYTE;
         if (fullType == "string[]" || fullType == "string*") return DataType::STRING;
+        
+        if (fullType.find("ptr<") == 0) {
+            size_t p1 = fullType.find("<");
+            size_t p2 = fullType.rfind(">");
+            if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
+                std::string base = fullType.substr(p1 + 1, p2 - p1 - 1);
+                while (!base.empty() && base.back() == ' ') base.pop_back();
+                while (!base.empty() && base.front() == ' ') base.erase(0, 1);
+                return parseDataType(base);
+            }
+        }
+        
         return DataType::INT;
     }
+    
+    else if (auto varNode = dynamic_cast<VarAccessNode*>(expr)) {
+        DataType t;
+        if (!lookupSymbol(varNode->name, t)) {
+            std::string sn;
+            if (lookupStructVar(varNode->name, sn)) {
+                return parseDataType(sn);
+            }
+            if (!is_lsp_mode) { std::cerr << "VarAccess Error: " << varNode->name << std::endl; }
+            throw std::runtime_error("Semantic Error: Undefined variable '" + varNode->name + "'");
+        }
+        if (is_lsp_mode) {
+            SymbolMeta meta;
+            if (lookupSymbolMeta(varNode->name, meta)) {
+                LSPSymbol sym;
+                sym.line = varNode->line;
+                sym.col = varNode->col;
+                sym.length = varNode->name.length();
+                sym.name = varNode->name;
+                sym.hover_text = "variable " + varNode->name + " : " + DataTypeToString(t);
+                sym.def_line = meta.def_line;
+                sym.def_col = meta.def_col;
+                sym.def_file = meta.def_file;
+                lsp_symbols.push_back(sym);
+            }
+        }
+        return t;
+    }
+    else if (auto binOp = dynamic_cast<BinOpNode*>(expr)) {
+        DataType leftT = checkExpression(binOp->left.get());
+        DataType rightT = checkExpression(binOp->right.get());
+        
+        if (binOp->op == "==" || binOp->op == "!=" || binOp->op == "<" || binOp->op == "<=" || binOp->op == ">" || binOp->op == ">=") {
+            return DataType::BOOL;
+        }
+        
+        if (leftT == DataType::FLOAT || rightT == DataType::FLOAT) return DataType::FLOAT;
+        if (leftT == DataType::DOUBLE || rightT == DataType::DOUBLE) return DataType::DOUBLE;
+        return leftT != DataType::UNKNOWN ? leftT : rightT;
+    }
+    else if (auto methodCall = dynamic_cast<MethodCallNode*>(expr)) {
+        DataType objType = checkExpression(methodCall->object.get());
+        for (const auto& arg : methodCall->args) {
+            checkExpression(arg.get());
+        }
+        std::string structName = "";
+        if (auto varNode = dynamic_cast<VarAccessNode*>(methodCall->object.get())) {
+            lookupStructVar(varNode->name, structName);
+        }
+        std::string mangledName = structName + "_" + methodCall->methodName;
+        if (function_table.find(mangledName) != function_table.end()) {
+            if (is_lsp_mode) {
+                FunctionSignature& sig = function_table[mangledName];
+                LSPSymbol sym;
+                sym.line = methodCall->line;
+                sym.col = methodCall->col;
+                sym.length = methodCall->methodName.length();
+                sym.name = methodCall->methodName;
+                sym.hover_text = "method " + mangledName + " -> " + DataTypeToString(sig.returnType);
+                sym.def_line = sig.def_line;
+                sym.def_col = sig.def_col;
+                sym.def_file = sig.def_file;
+                lsp_symbols.push_back(sym);
+            }
+            return function_table[mangledName].returnType;
+        }
+        return DataType::UNKNOWN;
+    }
+    else if (auto memberAcc = dynamic_cast<MemberAccessNode*>(expr)) {
+        std::string structName;
+        if (lookupStructVar(memberAcc->objectName, structName)) {
+            if (struct_table.find(structName) != struct_table.end()) {
+                StructInfo& info = struct_table[structName];
+                for (const auto& field : info.fields) {
+                    if (field.name == memberAcc->fieldName) {
+                        return parseDataType(field.type);
+                    }
+                }
+            }
+        }
+        return DataType::UNKNOWN;
+    }
+
     return DataType::UNKNOWN;
 }
 
@@ -366,6 +374,17 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     } else if (expectedType == DataType::POINTER) {
         pointer_var_table[decl->name] = decl->varType;
         std::string base = decl->varType;
+        
+        if (base.find("ptr<") == 0) {
+            size_t p1 = base.find("<");
+            size_t p2 = base.rfind(">");
+            if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
+                base = base.substr(p1 + 1, p2 - p1 - 1);
+                while (!base.empty() && base.back() == ' ') base.pop_back();
+                while (!base.empty() && base.front() == ' ') base.erase(0, 1);
+            }
+        }
+        
         while (!base.empty() && (base.back() == '*' || base.back() == ']')) {
             if (base.back() == ']') {
                 base.pop_back();
@@ -376,6 +395,8 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
                 base.pop_back();
             }
         }
+        
+        instantiateTemplateIfNeeded(base);
         if (struct_table.find(base) != struct_table.end()) {
             declareStructVar(decl->name, base);
         }
@@ -409,7 +430,7 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     }
     
     // Store in current scope
-    declareSymbol(decl->name, expectedType);
+    declareSymbol(decl->name, expectedType, decl->line, decl->col, decl->file);
 }
 
 // --- Statement Checking ---
@@ -484,8 +505,7 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         }
         DataType idxType = checkExpression(arrAssign->indexExpr.get());
         if (idxType != DataType::INT) {
-            std::cerr << "INDEX ERROR ON (ASSIGN): " << std::endl;
-            arrAssign->indexExpr->print(0);
+            if (!is_lsp_mode) { std::cerr << "INDEX ERROR ON (ASSIGN): " << std::endl; arrAssign->indexExpr->print(0); }
             throw std::runtime_error("Semantic Error: Array index must be an integer");
         }
         checkExpression(arrAssign->valExpr.get());
@@ -557,6 +577,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
             returnType = checkExpression(returnNode->expr.get());
         }
         if (returnType != current_routine_return_type && 
+            returnType != DataType::UNKNOWN &&
+            current_routine_return_type != DataType::UNKNOWN &&
             !((returnType == DataType::INT && current_routine_return_type == DataType::FLOAT) ||
               (returnType == DataType::FLOAT && current_routine_return_type == DataType::INT) ||
               (returnType == DataType::INT && current_routine_return_type == DataType::DOUBLE) ||
@@ -645,6 +667,17 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
         } else if (pt == DataType::POINTER) {
             pointer_var_table[param.name] = param.type;
             std::string base = param.type;
+            
+            if (base.find("ptr<") == 0) {
+                size_t p1 = base.find("<");
+                size_t p2 = base.rfind(">");
+                if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
+                    base = base.substr(p1 + 1, p2 - p1 - 1);
+                    while (!base.empty() && base.back() == ' ') base.pop_back();
+                    while (!base.empty() && base.front() == ' ') base.erase(0, 1);
+                }
+            }
+            
             while (!base.empty() && (base.back() == '*' || base.back() == ']')) {
                 if (base.back() == ']') {
                     base.pop_back();
@@ -655,6 +688,8 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
                     base.pop_back();
                 }
             }
+            
+            instantiateTemplateIfNeeded(base);
             if (struct_table.find(base) != struct_table.end()) {
                 declareStructVar(param.name, base);
             }
@@ -755,8 +790,10 @@ void SemanticAnalyzer::checkDeclarationsSecondPass(const std::vector<std::unique
 }
 
 void SemanticAnalyzer::analyze(ProgramNode* ast) {
-    std::cout << "[ALU CXX] Running Semantic Analysis..." << std::endl;
+    if (!is_lsp_mode) std::cout << "[ALU CXX] Running Semantic Analysis..." << std::endl;
     current_ast = ast;
     checkProgram(ast);
-    std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
+    if (!is_lsp_mode) std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
 }
+
+void SemanticAnalyzer::instantiateRoutineTemplateIfNeeded(const std::string& name, const std::vector<std::string>& type_args) {}

@@ -1,10 +1,12 @@
 // ALU Native Standard Library: mem
 // Bindings to libc <stdlib.h> and <string.h> for memory
 
+extern routine alu_alloc(int size) -> ptr<byte>;
 extern routine malloc(int size) -> string;
-extern routine free(string ptr) -> void;
+extern routine free_c(string ptr) -> void;
 extern routine calloc(int num, int size) -> string;
-extern routine realloc(string ptr, int size) -> string;
+extern routine realloc(ptr<byte> p, int size) -> ptr<byte>;
+extern routine alu_realloc(ptr<byte> p, int size) -> ptr<byte>;
 extern routine memcpy(string dest, string src, int n) -> string;
 extern routine memset(string str, int c, int n) -> string;
 extern routine memcmp(string str1, string str2, int n) -> int;

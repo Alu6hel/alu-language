@@ -1,0 +1,56 @@
+import "std/collections.alu";
+import "std/io.alu";
+
+routine main() -> int {
+    puts("--- Testing Vector<int> ---");
+    ptr<Vector<int> > vec = vec_new<int>();
+    
+    vec_push<int>(vec, 10);
+    vec_push<int>(vec, 20);
+    vec_push<int>(vec, 30);
+    
+    if (vec_len<int>(vec) == 3) {
+        puts("[PASS] Vector length is 3");
+    } else {
+        puts("[FAIL] Vector length is wrong");
+    }
+    
+    if (vec_get<int>(vec, 1) == 20) {
+        puts("[PASS] Vector get(1) == 20");
+    } else {
+        puts("[FAIL] Vector get(1) is wrong");
+    }
+    
+    vec_set<int>(vec, 1, 40);
+    if (vec_get<int>(vec, 1) == 40) {
+        puts("[PASS] Vector set(1, 40) works");
+    } else {
+        puts("[FAIL] Vector set(1, 40) failed");
+    }
+    
+    puts("--- Testing HashMap<string, int> ---");
+    ptr<HashMap<string, int> > map = map_new<string, int>();
+    
+    map_put_str_int(map, "hello", 100);
+    map_put_str_int(map, "world", 200);
+    
+    if (map_contains_str_int(map, "hello")) {
+        puts("[PASS] HashMap contains 'hello'");
+    } else {
+        puts("[FAIL] HashMap contains 'hello'");
+    }
+    
+    if (map_get_str_int(map, "world", 0) == 200) {
+        puts("[PASS] HashMap get 'world' == 200");
+    } else {
+        puts("[FAIL] HashMap get 'world' failed");
+    }
+    
+    if (map_contains_str_int(map, "missing") == 0) {
+        puts("[PASS] HashMap does not contain 'missing'");
+    } else {
+        puts("[FAIL] HashMap missing key check failed");
+    }
+
+    return 0;
+}

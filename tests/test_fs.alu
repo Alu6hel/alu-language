@@ -1,0 +1,56 @@
+import "std/fs.alu";
+import "std/io.alu";
+
+routine main() -> int {
+    puts("STARTING fs test...");
+    string file_path = "test_fs_output.txt";
+    string content = "Hello, ALU File System!\nThis is line 2.";
+    
+    // Test write
+    int w_res = fs_write_file(file_path, content);
+    if (w_res == 1) {
+        puts("[PASS] fs_write_file");
+    } else {
+        puts("[FAIL] fs_write_file");
+    }
+
+    // Test exists
+    int ex = fs_exists(file_path);
+    if (ex == 1) {
+        puts("[PASS] fs_exists");
+    } else {
+        puts("[FAIL] fs_exists");
+    }
+    
+    // Test append
+    int a_res = fs_append_file(file_path, "\nLine 3 appended.");
+    if (a_res == 1) {
+        puts("[PASS] fs_append_file");
+    } else {
+        puts("[FAIL] fs_append_file");
+    }
+    
+    // Test size
+    int size = fs_size(file_path);
+    if (size > 0) {
+        puts("[PASS] fs_size");
+    } else {
+        puts("[FAIL] fs_size");
+    }
+
+    // Test read
+    string read_content = fs_read_file(file_path);
+    puts("--- File Content ---");
+    puts(read_content);
+    puts("--------------------");
+    
+    // Test remove
+    int rm = remove(file_path);
+    if (rm == 0) {
+        puts("[PASS] remove");
+    } else {
+        puts("[FAIL] remove");
+    }
+    
+    return 0;
+}

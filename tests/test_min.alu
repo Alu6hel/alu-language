@@ -1,0 +1,6 @@
+import "std/io.alu";
+
+routine main() -> int {
+    puts("STARTING minimal test...");
+    return 0;
+}

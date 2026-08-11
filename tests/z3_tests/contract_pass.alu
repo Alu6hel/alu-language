@@ -1,0 +1,13 @@
+// ALU Test: @requires and @ensures contracts that are satisfied.
+// Expected: Z3 verification PASSES (exit code 0).
+
+@requires(x > 0)
+@ensures(return > 0)
+routine double_positive(int x) -> int {
+    return x + x;
+}
+
+routine main() -> int {
+    int result = double_positive(5);
+    return 0;
+}

@@ -1,4 +1,6 @@
+#include <fstream>
 #include "llvm_codegen.h"
+#include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -7,7 +9,65 @@ LLVMCodeGen::LLVMCodeGen(const std::string& target) : tmp_counter(1), target_arc
 }
 
 std::string LLVMCodeGen::getIR() const {
-    return ir_output.str() + "\n" + global_strings_output.str();
+    std::string di_str = emit_debug_info ? "\n" + di_output.str() : "";
+    return ir_output.str() + "\n" + global_strings_output.str() + di_str;
+}
+
+int LLVMCodeGen::getDIFile(const std::string& filename) {
+    if (!emit_debug_info) return -1;
+    if (di_file_ids.find(filename) != di_file_ids.end()) return di_file_ids[filename];
+
+    std::filesystem::path p(filename);
+    std::string base_name = p.filename().string();
+    std::string dir_name = p.parent_path().string();
+    if (dir_name.empty()) dir_name = ".";
+    // Convert backslashes to forward slashes for LLVM
+    std::replace(dir_name.begin(), dir_name.end(), '\\', '/');
+
+    int file_id = di_counter++;
+    di_output << "!" << file_id << " = !DIFile(filename: \"" << base_name << "\", directory: \"" << dir_name << "\")\n";
+    di_file_ids[filename] = file_id;
+
+    if (di_cu_id == -1) {
+        di_cu_id = di_counter++;
+        di_output << "!" << di_cu_id << " = distinct !DICompileUnit(language: DW_LANG_C99, file: !" << file_id << ", producer: \"alu compiler\", isOptimized: false, runtimeVersion: 0, emissionKind: FullDebug, splitDebugInlining: false, nameTableKind: None)\n";
+        di_output << "!llvm.dbg.cu = !{!" << di_cu_id << "}\n";
+        
+        int dw_ver = di_counter++;
+        di_output << "!" << dw_ver << " = !{i32 7, !\"Dwarf Version\", i32 4}\n";
+        int dbg_ver = di_counter++;
+        di_output << "!" << dbg_ver << " = !{i32 2, !\"Debug Info Version\", i32 3}\n";
+        di_output << "!llvm.module.flags = !{!" << dw_ver << ", !" << dbg_ver << "}\n";
+    }
+
+    return file_id;
+}
+
+int LLVMCodeGen::getDIType(const std::string& typeName) {
+    if (!emit_debug_info) return -1;
+    if (di_type_ids.find(typeName) != di_type_ids.end()) return di_type_ids[typeName];
+
+    int type_id = di_counter++;
+    int size = 32;
+    std::string encoding = "DW_ATE_signed";
+    if (typeName == "int") { size = 32; encoding = "DW_ATE_signed"; }
+    else if (typeName == "bool") { size = 8; encoding = "DW_ATE_boolean"; }
+    else if (typeName == "float") { size = 32; encoding = "DW_ATE_float"; }
+    else if (typeName == "double") { size = 64; encoding = "DW_ATE_float"; }
+    else if (typeName == "byte") { size = 8; encoding = "DW_ATE_unsigned"; }
+    else if (typeName == "string") { size = 64; encoding = "DW_ATE_address"; }
+    else { size = 64; encoding = "DW_ATE_address"; } // pointers, arrays, structs
+
+    di_output << "!" << type_id << " = !DIBasicType(name: \"" << typeName << "\", size: " << size << ", encoding: " << encoding << ")\n";
+    di_type_ids[typeName] = type_id;
+    return type_id;
+}
+
+std::string LLVMCodeGen::getDILoc() {
+    if (!emit_debug_info || current_di_scope == -1 || current_debug_node == nullptr) return "";
+    int loc_id = di_counter++;
+    di_output << "!" << loc_id << " = !DILocation(line: " << current_debug_node->line << ", column: " << current_debug_node->col << ", scope: !" << current_di_scope << ")\n";
+    return "!dbg !" + std::to_string(loc_id);
 }
 
 void LLVMCodeGen::emitUnhandledFallback() {
@@ -57,7 +117,7 @@ void LLVMCodeGen::emitExceptionUnwind() {
 void LLVMCodeGen::saveToFile(const std::string& filename) const {
     std::ofstream out(filename);
     if (out.is_open()) {
-        out << ir_output.str() << "\n" << global_strings_output.str();
+        out << getIR();
         out.close();
     }
 }
@@ -70,7 +130,7 @@ std::string LLVMCodeGen::getLabel(const std::string& prefix) {
     return prefix + std::to_string(label_counter++);
 }
 
-void LLVMCodeGen::emit(const std::string& code) {
+void LLVMCodeGen::emit(const std::string& code, ASTNode* node) {
     if (code.find(":") != std::string::npos && code.find(" ") == std::string::npos) {
         block_terminated = false;
     }
@@ -80,7 +140,26 @@ void LLVMCodeGen::emit(const std::string& code) {
     
     if (block_terminated) return;
     
-    ir_output << code << "\n";
+    std::string final_code = code;
+    
+    if (emit_debug_info && node != nullptr) {
+        current_debug_node = node;
+    }
+    
+    // Only append debug location if it's an instruction
+    if (emit_debug_info && current_debug_node != nullptr && current_di_scope != -1) {
+        if (code.rfind("  ", 0) == 0 && code.find(":") == std::string::npos && code.find(";") == std::string::npos) {
+            // Append debug location unless it's a simple register assignment or already has metadata
+            if (code.find("!dbg") == std::string::npos) {
+                std::string loc = getDILoc();
+                if (!loc.empty()) {
+                    final_code += ", " + loc;
+                }
+            }
+        }
+    }
+    
+    ir_output << final_code << "\n";
     
     if (code.find("  ret ") == 0 || code.find("  br ") == 0 || code.find("  unreachable") == 0) {
         block_terminated = true;
@@ -160,7 +239,17 @@ void LLVMCodeGen::declareVarType(const std::string& name, const std::string& llv
 
 void LLVMCodeGen::declareStructType(const std::string& name, const std::string& structName) {
     if (!struct_type_stack.empty()) {
-        struct_type_stack.back()[name] = getNamespacedName(structName);
+        std::string actualName = structName;
+        if (actualName.find("ptr") == 0) {
+            size_t pos1 = actualName.find("<");
+            size_t pos2 = actualName.rfind(">");
+            if (pos1 != std::string::npos && pos2 != std::string::npos && pos2 > pos1) {
+                actualName = actualName.substr(pos1 + 1, pos2 - pos1 - 1);
+                while (!actualName.empty() && actualName.back() == ' ') actualName.pop_back();
+                while (!actualName.empty() && actualName.front() == ' ') actualName.erase(0, 1);
+            }
+        }
+        struct_type_stack.back()[name] = getNamespacedName(actualName);
     }
 }
 
@@ -194,6 +283,7 @@ void ForNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void TryCatchNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ThrowNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ReturnNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
+void AssertNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void FuncCallNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void RoutineNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ExternRoutineNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
@@ -327,6 +417,7 @@ std::string LLVMCodeGen::getInferredLLVMType(ASTNode* expr) {
 }
 
 void LLVMCodeGen::visit(AsmCallNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     // Map our custom asm("Hello World") directly to a C-standard puts() call in LLVM IR
     std::string text = node->instruction;
     // Strip quotes for LLVM IR string format
@@ -356,6 +447,7 @@ void LLVMCodeGen::visit(AsmCallNode* node) {
 }
 
 void LLVMCodeGen::visit(UnsafeBlockNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     emit("  ; Begin unsafe block");
     for (const auto& stmt : node->body) {
         stmt->codegen(*this);
@@ -401,7 +493,20 @@ std::string LLVMCodeGen::getNamespacedName(const std::string& name) {
 }
 
 std::string LLVMCodeGen::getLLVMType(const std::string& type) {
-    if (type == "int") return "i32";
+      static std::ofstream d_log("dump_types.log", std::ios_base::app);
+      d_log << "GETLLVMTYPE: '" << type << "'" << std::endl;
+      
+      if (type.find("ptr") == 0) {
+          size_t pos1 = type.find("<");
+          size_t pos2 = type.rfind(">");
+          if (pos1 != std::string::npos && pos2 != std::string::npos && pos2 > pos1) {
+              std::string base = type.substr(pos1 + 1, pos2 - pos1 - 1);
+              while (!base.empty() && base.back() == ' ') base.pop_back();
+              while (!base.empty() && base.front() == ' ') base.erase(0, 1);
+              return getLLVMType(base) + "*";
+          }
+      }
+      if (type == "int") return "i32";
     if (type == "float") return "float";
     if (type == "double") return "double";
     if (type == "string") return "i8*";
@@ -426,6 +531,7 @@ std::string LLVMCodeGen::getLLVMType(const std::string& type) {
 }
 
 std::string LLVMCodeGen::visit(LiteralNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     if (node->type == DataType::INT) {
         return node->value;
     } else if (node->type == DataType::FLOAT) {
@@ -480,6 +586,7 @@ std::string LLVMCodeGen::visit(LiteralNode* node) {
 }
 
 std::string LLVMCodeGen::visit(VarAccessNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string irName = lookupIRName(node->name);
     std::string llvm_type = lookupVarType(node->name);
     if (llvm_type == "") llvm_type = "i32"; // Fallback
@@ -499,6 +606,7 @@ std::string LLVMCodeGen::visit(VarAccessNode* node) {
 }
 
 std::string LLVMCodeGen::visit(AddressOfNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     // AddressOf only makes sense for variables or fields.
     // For local vars, we just return the alloca name as a value (no load).
     if (auto varNode = dynamic_cast<VarAccessNode*>(node->expr.get())) {
@@ -508,29 +616,67 @@ std::string LLVMCodeGen::visit(AddressOfNode* node) {
 }
 
 std::string LLVMCodeGen::visit(DereferenceNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string ptr_reg = evaluateExpression(node->expr.get());
-    // Assume i32* for simple prototype
+    std::string expr_type = getInferredLLVMType(node->expr.get());
+    std::string elem_type = "i32";
+    if (!expr_type.empty() && expr_type.back() == '*') {
+        elem_type = expr_type;
+        elem_type.pop_back();
+    }
+    
     std::string val_reg = getTempReg();
-    emit("  " + val_reg + " = load i32, i32* " + ptr_reg + ", align 4");
+    emit("  " + val_reg + " = load " + elem_type + ", " + expr_type + " " + ptr_reg + ", align 4");
     return val_reg;
 }
 
 void LLVMCodeGen::visit(DerefAssignNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string ptr_reg = evaluateExpression(node->ptr_expr.get());
+    std::string expr_type = getInferredLLVMType(node->ptr_expr.get());
     std::string val_reg = evaluateExpression(node->val_expr.get());
-    emit("  store i32 " + val_reg + ", i32* " + ptr_reg + ", align 4");
+    
+    std::string elem_type = "i32";
+    if (!expr_type.empty() && expr_type.back() == '*') {
+        elem_type = expr_type;
+        elem_type.pop_back();
+    }
+    
+    emit("  store " + elem_type + " " + val_reg + ", " + expr_type + " " + ptr_reg + ", align 4");
 }
 
 std::string LLVMCodeGen::visit(NewAllocationNode* node) {
-    std::string reg = getTempReg();
-    emit("  " + reg + " = call i8* @alu_alloc(i64 16)");
-    std::string cast_reg = getTempReg();
+    if (emit_debug_info) current_debug_node = node;
     std::string llvm_type = getLLVMType(node->typeName);
-    emit("  " + cast_reg + " = bitcast i8* " + reg + " to " + llvm_type);
+    std::string base_type = llvm_type;
+    
+    // In Alu, getLLVMType for a struct returns '%StructName*'.
+    // We need the size of the struct itself, so we remove the trailing '*'.
+    if (!base_type.empty() && base_type.back() == '*') {
+        base_type.pop_back();
+    }
+    
+    // In Alu, 'new Type' returns a pointer to 'Type'
+    // Since 'llvm_type' already has the '*', ptr_type should just be llvm_type.
+    // Wait, if llvm_type is '%StructName*', it is already a pointer to the struct.
+    // But Alu's pointer type for custom structs is 'ptr<StructName>' which maps to '%StructName**'.
+    // Therefore, 'new' returning a pointer to the struct means it returns '%StructName*'.
+    std::string ptr_type = base_type + "*";
+    
+    std::string size_ptr = getTempReg();
+    emit("  " + size_ptr + " = getelementptr " + base_type + ", " + base_type + "* null, i32 1");
+    std::string size_int = getTempReg();
+    emit("  " + size_int + " = ptrtoint " + base_type + "* " + size_ptr + " to i32");
+
+    std::string reg = getTempReg();
+    emit("  " + reg + " = call i8* @__alu_alloc_internal(i32 " + size_int + ")");
+    std::string cast_reg = getTempReg();
+    emit("  " + cast_reg + " = bitcast i8* " + reg + " to " + ptr_type);
     return cast_reg;
 }
 
 void LLVMCodeGen::visit(FreeNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string ptr_reg = evaluateExpression(node->expr.get());
     std::string expr_type = getInferredLLVMType(node->expr.get());
     if (expr_type == "") expr_type = "i32*"; // Fallback
@@ -541,6 +687,7 @@ void LLVMCodeGen::visit(FreeNode* node) {
 }
 
 void LLVMCodeGen::visit(ArrayDeclNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string size_val = evaluateExpression(node->sizeExpr.get());
     std::string llvm_type = getLLVMType(node->type);
     std::string irName = getUniqueName(node->name);
@@ -552,6 +699,7 @@ void LLVMCodeGen::visit(ArrayDeclNode* node) {
 }
 
 std::string LLVMCodeGen::visit(ArrayIndexNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string idx_reg = evaluateExpression(node->indexExpr.get());
     
     // Evaluate the array expression. For pointers, this loads the pointer value.
@@ -588,6 +736,7 @@ std::string LLVMCodeGen::visit(ArrayIndexNode* node) {
 }
 
 void LLVMCodeGen::visit(ArrayAssignNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string idx_reg = evaluateExpression(node->indexExpr.get());
     std::string val_reg = evaluateExpression(node->valExpr.get());
     
@@ -630,6 +779,7 @@ void LLVMCodeGen::visit(ArrayAssignNode* node) {
 }
 
 std::string LLVMCodeGen::visit(BinOpNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string lval = evaluateExpression(node->left.get());
     std::string rval = evaluateExpression(node->right.get());
 
@@ -737,6 +887,7 @@ std::string LLVMCodeGen::visit(BinOpNode* node) {
 }
 
 std::string LLVMCodeGen::visit(MethodCallNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     auto varObj = dynamic_cast<VarAccessNode*>(node->object.get());
     std::string llvm_type = lookupVarType(varObj->name);
     if (llvm_type.empty()) llvm_type = "i32";
@@ -840,11 +991,13 @@ std::string LLVMCodeGen::visit(MethodCallNode* node) {
 }
 
 void LLVMCodeGen::visit(ImportNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     // LLVM CodeGen doesn't need to do anything for imports
     // The AST nodes from the imported file are already merged in ProgramNode
 }
 
 void LLVMCodeGen::visit(VarDeclNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     // 1. Allocate memory on the stack (alloca)
     std::string llvm_type = getLLVMType(node->varType);
     std::string irName = getUniqueName(node->name);
@@ -853,6 +1006,14 @@ void LLVMCodeGen::visit(VarDeclNode* node) {
     
     if (node->varType != "int" && node->varType != "string" && node->varType != "bool" && node->varType != "float" && node->varType != "double" && node->varType != "byte") {
         declareStructType(node->name, node->varType);
+    }
+    
+    if (emit_debug_info) {
+        int file_id = getDIFile(node->file);
+        int v_type_id = getDIType(node->varType);
+        int var_id = di_counter++;
+        di_output << "!" << var_id << " = !DILocalVariable(name: \"" << node->name << "\", scope: !" << current_di_scope << ", file: !" << file_id << ", line: " << node->line << ", type: !" << v_type_id << ")\n";
+        emit("  call void @llvm.dbg.declare(metadata " + llvm_type + "* %" + irName + ", metadata !" + std::to_string(var_id) + ", metadata !DIExpression())", node);
     }
     
     if (node->initializer) {
@@ -885,6 +1046,7 @@ void LLVMCodeGen::visit(VarDeclNode* node) {
 }
 
 void LLVMCodeGen::visit(VarAssignNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string val = evaluateExpression(node->expr.get());
     std::string irName = lookupIRName(node->name);
     std::string llvm_type = lookupVarType(node->name);
@@ -916,13 +1078,25 @@ void LLVMCodeGen::visit(VarAssignNode* node) {
         std::string cast_old_reg = getTempReg();
         emit("  " + cast_old_reg + " = bitcast " + llvm_type + " " + old_val_reg + " to i8*");
         emit("  call void @alu_release(i8* " + cast_old_reg + ")");
+    } else if (llvm_type.back() == '*' && expr_type.back() == '*' && llvm_type != expr_type) {
+        std::string cast_reg = getTempReg();
+        emit("  " + cast_reg + " = bitcast " + expr_type + " " + val + " to " + llvm_type);
+        val = cast_reg;
     }
     
     emit("  store " + llvm_type + " " + val + ", " + llvm_type + "* %" + irName + ", align 4");
 }
 
 void LLVMCodeGen::visit(IfNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string cond_reg = evaluateExpression(node->condition.get());
+    std::string cond_type = getInferredLLVMType(node->condition.get());
+    if (cond_type == "") cond_type = "i32";
+    if (cond_type != "i1") {
+        std::string bool_reg = getTempReg();
+        emit("  " + bool_reg + " = icmp ne " + cond_type + " " + cond_reg + ", 0");
+        cond_reg = bool_reg;
+    }
     
     std::string then_label = getLabel("if.then");
     std::string else_label = node->else_body.empty() ? getLabel("if.end") : getLabel("if.else");
@@ -948,6 +1122,7 @@ void LLVMCodeGen::visit(IfNode* node) {
 }
 
 void LLVMCodeGen::visit(WhileNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string cond_label = getLabel("while.cond");
     std::string body_label = getLabel("while.body");
     std::string end_label = getLabel("while.end");
@@ -956,6 +1131,13 @@ void LLVMCodeGen::visit(WhileNode* node) {
     emit(cond_label + ":");
     
     std::string cond_reg = evaluateExpression(node->condition.get());
+    std::string cond_type = getInferredLLVMType(node->condition.get());
+    if (cond_type == "") cond_type = "i32";
+    if (cond_type != "i1") {
+        std::string bool_reg = getTempReg();
+        emit("  " + bool_reg + " = icmp ne " + cond_type + " " + cond_reg + ", 0");
+        cond_reg = bool_reg;
+    }
     
     emit("  br i1 " + cond_reg + ", label %" + body_label + ", label %" + end_label);
     
@@ -969,6 +1151,7 @@ void LLVMCodeGen::visit(WhileNode* node) {
 }
 
 void LLVMCodeGen::visit(ForNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     // Hardware-Accelerated Compute Shader Detection (Heuristic)
     bool hasNestedLoop = false;
     for (const auto& stmt : node->body) {
@@ -979,7 +1162,7 @@ void LLVMCodeGen::visit(ForNode* node) {
     }
     
     if (hasNestedLoop) {
-        std::cout << "[ALU GPU Optimizer] Detected image transformation nested loop! Emitting Vulkan and Metal Compute Shaders..." << std::endl;
+        std::cerr << "[ALU GPU Optimizer] Detected image transformation nested loop! Emitting Vulkan and Metal Compute Shaders..." << std::endl;
         
         // Vulkan (GLSL)
         std::ofstream compFile("compute_shader.comp");
@@ -1047,6 +1230,7 @@ void LLVMCodeGen::visit(ForNode* node) {
 }
 
 void LLVMCodeGen::visit(ThrowNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string ex_val = evaluateExpression(node->expr.get());
     std::string expr_type = getInferredLLVMType(node->expr.get());
     
@@ -1082,6 +1266,7 @@ void LLVMCodeGen::visit(ThrowNode* node) {
 }
 
 void LLVMCodeGen::visit(TryCatchNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string catch_label = getLabel("catch");
     std::string end_try_label = getLabel("end_try");
     
@@ -1137,6 +1322,7 @@ void LLVMCodeGen::visit(TryCatchNode* node) {
 }
 
 void LLVMCodeGen::visit(ReturnNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     emitScopeReleases(-1); // Release all variables in all scopes before returning
     if (node->expr) {
         std::string val = evaluateExpression(node->expr.get());
@@ -1148,7 +1334,15 @@ void LLVMCodeGen::visit(ReturnNode* node) {
     }
 }
 
+void LLVMCodeGen::visit(AssertNode* node) {
+    if (emit_debug_info) current_debug_node = node;
+    // Zero-Cost Abstraction: The Z3 Theorem Prover has mathematically verified
+    // that this condition is unconditionally true at compile time.
+    // No LLVM IR needs to be emitted for runtime evaluation.
+}
+
 std::string LLVMCodeGen::visit(FuncCallNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::vector<std::string> arg_vals;
     std::vector<std::string> arg_types;
     std::vector<bool> arg_is_arc_ptr;
@@ -1265,6 +1459,9 @@ std::string LLVMCodeGen::visit(FuncCallNode* node) {
 }
 
 void LLVMCodeGen::visit(RoutineNode* node) {
+    if (emit_debug_info) current_debug_node = node;
+    if (!node->type_params.empty()) return; // Skip generic templates
+
     // Clear scope stacks and push a fresh function-level scope
     var_type_stack.clear();
     struct_type_stack.clear();
@@ -1282,10 +1479,26 @@ void LLVMCodeGen::visit(RoutineNode* node) {
         params_str += ptype + " %in_" + node->params[i].name;
         if (i < node->params.size() - 1) params_str += ", ";
     }
+    int file_id = getDIFile(node->file);
+    int subrt_id = di_counter++;
+    int sp_id = di_counter++;
+    
+    if (emit_debug_info) {
+        // Simple subroutine type for now (just representing a function)
+        di_output << "!" << subrt_id << " = !DISubroutineType(types: !{null})\n";
+        di_output << "!" << sp_id << " = distinct !DISubprogram(name: \"" << node->name << "\", scope: !" << file_id << ", file: !" << file_id << ", line: " << node->line << ", type: !" << subrt_id << ", scopeLine: " << node->line << ", spFlags: DISPFlagDefinition, unit: !" << di_cu_id << ")\n";
+        current_di_scope = sp_id;
+    }
+
     std::string safeName = getNamespacedName(node->name);
     if (!params_str.empty()) params_str += ", ";
     params_str += "i8** %__alu_err";
-    emit("define " + ret_type + " @" + safeName + "(" + params_str + ") {");
+    
+    std::string def_str = "define " + ret_type + " @" + safeName + "(" + params_str + ")";
+    if (emit_debug_info) def_str += " !dbg !" + std::to_string(sp_id);
+    def_str += " {";
+    
+    emit(def_str);
     emit("entry:");
     emit("  %current_exception = alloca i8*, align 8");
     emit("  store i8* null, i8** %current_exception, align 8");
@@ -1299,6 +1512,13 @@ void LLVMCodeGen::visit(RoutineNode* node) {
         declareVarType(p.name, ptype);
         if (p.type != "int" && p.type != "string" && p.type != "bool") {
             declareStructType(p.name, p.type);
+        }
+        
+        if (emit_debug_info) {
+            int p_type_id = getDIType(p.type);
+            int var_id = di_counter++;
+            di_output << "!" << var_id << " = !DILocalVariable(name: \"" << p.name << "\", scope: !" << current_di_scope << ", file: !" << file_id << ", line: " << node->line << ", type: !" << p_type_id << ")\n";
+            emit("  call void @llvm.dbg.declare(metadata " + ptype + "* %" + p.name + ", metadata !" + std::to_string(var_id) + ", metadata !DIExpression())", node);
         }
     }
     
@@ -1321,9 +1541,12 @@ void LLVMCodeGen::visit(RoutineNode* node) {
     if (!var_type_stack.empty()) var_type_stack.pop_back();
     if (!struct_type_stack.empty()) struct_type_stack.pop_back();
     if (!ir_name_stack.empty()) ir_name_stack.pop_back();
+    
+    current_di_scope = -1;
 }
 
 void LLVMCodeGen::visit(ExternRoutineNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string ret_type = getLLVMType(node->returnType);
     
     std::string params_str = "";
@@ -1344,6 +1567,7 @@ void LLVMCodeGen::visit(ExternRoutineNode* node) {
     }
 }
 void LLVMCodeGen::visit(StructDefNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     if (!node->type_params.empty()) return; // skip templates
     std::string fields = "";
     std::string safeName = getNamespacedName(node->name);
@@ -1359,6 +1583,7 @@ void LLVMCodeGen::visit(StructDefNode* node) {
 }
 
 std::string LLVMCodeGen::visit(MemberAccessNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string structName = lookupStructType(node->objectName);
     structName = sanitizeLLVMName(structName);
     
@@ -1386,6 +1611,7 @@ std::string LLVMCodeGen::visit(MemberAccessNode* node) {
 }
 
 void LLVMCodeGen::visit(MemberAssignNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string structName = lookupStructType(node->objectName);
     structName = sanitizeLLVMName(structName);
     
@@ -1407,10 +1633,18 @@ void LLVMCodeGen::visit(MemberAssignNode* node) {
     emit("  " + field_ptr + " = getelementptr %" + structName + ", %" + structName + "* " + ptr_reg + ", i32 0, i32 " + std::to_string(fieldIdx));
     
     std::string val_reg = evaluateExpression(node->expr.get());
+    std::string valType = getInferredLLVMType(node->expr.get());
+    if (fieldType.back() == '*' && valType.back() == '*' && fieldType != valType) {
+        std::string cast_reg = getTempReg();
+        emit("  " + cast_reg + " = bitcast " + valType + " " + val_reg + " to " + fieldType);
+        val_reg = cast_reg;
+    }
+    
     emit("  store " + fieldType + " " + val_reg + ", " + fieldType + "* " + field_ptr + ", align 4");
 }
 
 std::string LLVMCodeGen::visit(CastNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string val_reg = evaluateExpression(node->expr.get());
     std::string src_type = getInferredLLVMType(node->expr.get());
     std::string dst_type;
@@ -1457,6 +1691,8 @@ std::string LLVMCodeGen::visit(CastNode* node) {
         emit("  " + out_reg + " = trunc i32 " + val_reg + " to i8");
     } else if (src_type == "i8" && dst_type == "i32") {
         emit("  " + out_reg + " = zext i8 " + val_reg + " to i32");
+    } else if (src_type.back() == '*' && dst_type.back() == '*' && src_type != dst_type) {
+        emit("  " + out_reg + " = bitcast " + src_type + " " + val_reg + " to " + dst_type);
     } else if (!src_type.empty() && src_type.back() == '*' && dst_type == "i32") {
         emit("  " + out_reg + " = ptrtoint " + src_type + " " + val_reg + " to i32");
     } else if (src_type == "i32" && !dst_type.empty() && dst_type.back() == '*') {
@@ -1468,10 +1704,12 @@ std::string LLVMCodeGen::visit(CastNode* node) {
 }
 
 void LLVMCodeGen::visit(EffectDeclNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     // Interface definition
 }
 
 void LLVMCodeGen::visit(HandleNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string parent_fiber = getTempReg();
     emit("  ; --- HANDLE " + node->effect_name + " ---");
     emit("  " + parent_fiber + " = call i8* @ConvertThreadToFiber(i8* null)");
@@ -1513,6 +1751,7 @@ void LLVMCodeGen::visit(HandleNode* node) {
 }
 
 void LLVMCodeGen::visit(YieldNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     emit("  ; --- YIELD " + node->effect_name + "." + node->method_name + " ---");
     // Switch back to parent fiber
     std::string parent_fiber = getTempReg();
@@ -1521,6 +1760,7 @@ void LLVMCodeGen::visit(YieldNode* node) {
 }
 
 void LLVMCodeGen::visit(ResumeNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     emit("  ; --- RESUME ---");
     if (node->expr) {
         std::string val = evaluateExpression(node->expr.get());
@@ -1533,7 +1773,8 @@ void LLVMCodeGen::visit(ResumeNode* node) {
 }
 
 void LLVMCodeGen::visit(ProgramNode* node) {
-    std::cout << "[ALU LLVM CodeGen] Translating AST to LLVM IR (Text Form)..." << std::endl;
+    if (emit_debug_info) current_debug_node = node;
+    std::cerr << "[ALU LLVM CodeGen] Translating AST to LLVM IR (Text Form)..." << std::endl;
     
     emit("; ModuleID = 'alu_module'");
     emit("source_filename = \"alu_source.alu\"");
@@ -1566,13 +1807,17 @@ void LLVMCodeGen::visit(ProgramNode* node) {
     emit("@__alu_exception_ptr = global i8* null, align 8");
     emit("@__alu_exception_msg = global i8* null, align 8");
     
+    if (emit_debug_info) {
+        emit("declare void @llvm.dbg.declare(metadata, metadata, metadata)\n");
+    }
+    
     // Fiber globals
     emit("@__alu_parent_fiber = global i8* null, align 8");
     emit("@__alu_child_fiber = global i8* null, align 8\n");
     
     // ARC Native Runtime Implementations
     // Use external ARC functions from C++ backend
-    emit("declare i8* @alu_alloc(i64)");
+    emit("declare i8* @__alu_alloc_internal(i32)");
     emit("declare void @alu_retain(i8*)");
     emit("declare void @alu_release(i8*)");
 
@@ -1590,7 +1835,7 @@ void LLVMCodeGen::visit(ProgramNode* node) {
     // Main pass: Routines and everything else
     codegenDeclarationsMainPass(node->declarations);
     
-    std::cout << "[ALU LLVM CodeGen] Translation Complete." << std::endl;
+    std::cerr << "[ALU LLVM CodeGen] Translation Complete." << std::endl;
 }
 
 void LLVMCodeGen::registerReturnTypes(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
@@ -1638,6 +1883,7 @@ void LLVMCodeGen::codegenDeclarationsMainPass(const std::vector<std::unique_ptr<
 }
 
 void LLVMCodeGen::visit(NamespaceNode* node) {
+    if (emit_debug_info) current_debug_node = node;
     std::string old_ns = current_namespace;
     if (current_namespace.empty()) current_namespace = node->name;
     else current_namespace += "__" + node->name;

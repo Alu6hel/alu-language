@@ -1,0 +1,8 @@
+routine test_div(int x) -> int {
+    return 100 / x;
+}
+
+routine main() -> int {
+    int y = test_div(0);
+    return 0;
+}

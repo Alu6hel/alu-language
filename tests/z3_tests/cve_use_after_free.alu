@@ -1,0 +1,7 @@
+routine main() -> int {
+    int* ptr = new int;
+    *ptr = 10;
+    free(ptr);
+    int x = *ptr; // Z3 should catch Use-After-Free here
+    return 0;
+}

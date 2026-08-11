@@ -1,0 +1,6 @@
+routine main() -> int {
+    int* ptr = new int;
+    *ptr = 10;
+    // Memory Leak: ptr is not freed before returning
+    return 0;
+}

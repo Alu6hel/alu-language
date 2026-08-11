@@ -16,48 +16,81 @@ if not os.path.exists(alu_cxx):
     print(f"Error: Could not find alu compiler at {alu_cxx}")
     sys.exit(1)
 
-test_files = [
-    "cve_buffer_overflow.alu",
-    "cve_buffer_underread.alu",
-    "cve_loop_overflow.alu"
+# Test definitions: (filename, should_fail, should_have_z3_fatal)
+# should_fail=True means we expect non-zero exit code
+# should_have_z3_fatal=True means we expect "[ALU CXX Z3 FATAL]" in output
+test_cases = [
+    # Existing bounds-check tests (should fail with Z3 FATAL)
+    ("cve_buffer_overflow.alu",      True,  True),
+    ("cve_buffer_underread.alu",     True,  True),
+    ("cve_loop_overflow.alu",        True,  True),
+    ("cve_division_by_zero.alu",     True,  True),
+    ("cve_use_after_free.alu",       True,  True),
+    ("cve_double_free.alu",          True,  True),
+    ("cve_memory_leak.alu",          True,  True),
+    ("cve_use_after_move.alu",       True,  True),
+    ("cve_invalid_borrow_free.alu",  True,  True),
+    
+    # Contract tests
+    ("contract_pass.alu",            False, False),  # Should PASS (contracts satisfied)
+    ("contract_fail_requires.alu",   True,  True),   # Should FAIL (@requires violated)
+    ("contract_fail_ensures.alu",    True,  True),   # Should FAIL (@ensures violated)
+
+    # Business Logic Asserts
+    ("business_logic_pass.alu",      False, False),
+    ("business_logic_fail.alu",      True,  True),
 ]
 
 all_passed = True
 
-print("=== Starting Z3 Theorem Prover CVE Test Suite ===")
+print("=== Starting Z3 Theorem Prover CVE + Contract Test Suite ===")
 
-for test_file in test_files:
+for test_file, expect_fail, expect_z3_fatal in test_cases:
     file_path = os.path.join(test_dir, test_file)
     print(f"\nTesting: {test_file}")
     
-    # Run the compiler
+    # Run the compiler from the project root so it can find std/ backend files
     cmd = [alu_cxx, "build", file_path]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True)
     
     output = result.stdout + result.stderr
     
-    # 1. It must fail (non-zero exit code)
     failed = result.returncode != 0
-    # 2. It must explicitly mention the Z3 FATAL warning
     caught_by_z3 = "[ALU CXX Z3 FATAL]" in output
     
-    if failed and caught_by_z3:
-        print(f"  [PASS] Z3 successfully caught the vulnerability and blocked compilation.")
+    if expect_fail:
+        # We expect the compiler to fail with Z3 FATAL
+        if failed and caught_by_z3:
+            print(f"  [PASS] Z3 successfully caught the vulnerability and blocked compilation.")
+        else:
+            all_passed = False
+            print(f"  [FAIL] Test did not meet expectations.")
+            if not failed:
+                print(f"    Compiler succeeded (Exit code 0), but should have failed!")
+            if not caught_by_z3:
+                print(f"    Z3 warning missing from output!")
+            print("--- COMPILER OUTPUT ---")
+            print(output)
+            print("-----------------------")
     else:
-        all_passed = False
-        print(f"  [FAIL] Test did not meet expectations.")
-        if not failed:
-            print(f"    Compiler succeeded (Exit code 0), but should have failed!")
-        if not caught_by_z3:
-            print(f"    Z3 warning missing from output!")
-        print("--- COMPILER OUTPUT ---")
-        print(output)
-        print("-----------------------")
+        # We expect the compiler to succeed (no Z3 errors)
+        if not failed and not caught_by_z3:
+            print(f"  [PASS] Z3 verification passed as expected (contracts satisfied).")
+        else:
+            all_passed = False
+            print(f"  [FAIL] Test did not meet expectations.")
+            if failed:
+                print(f"    Compiler failed (Exit code {result.returncode}), but should have succeeded!")
+            if caught_by_z3:
+                print(f"    Unexpected Z3 FATAL in output!")
+            print("--- COMPILER OUTPUT ---")
+            print(output)
+            print("-----------------------")
 
 print("\n================================================")
 if all_passed:
-    print("SUCCESS: All Z3 tests passed! Zero-Day Immunity verified.")
+    print("SUCCESS: All Z3 tests passed! Zero-Day Immunity + Contract Enforcement verified.")
     sys.exit(0)
 else:
-    print("FAILED: Some Z3 tests did not catch the vulnerabilities.")
+    print("FAILED: Some Z3 tests did not meet expectations.")
     sys.exit(1)

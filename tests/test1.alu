@@ -1,0 +1,3 @@
+routine say_hello() -> int {
+    return 1;
+}

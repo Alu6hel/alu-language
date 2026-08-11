@@ -1,0 +1,8 @@
+import "std/fs.alu";
+import "std/io.alu";
+
+routine main() -> int {
+    puts("Test Write");
+    fs_write_file("test_out.txt", "Hello");
+    return 0;
+}

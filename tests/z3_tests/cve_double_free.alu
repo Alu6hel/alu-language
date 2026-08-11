@@ -1,0 +1,6 @@
+routine main() -> int {
+    int* ptr = new int;
+    free(ptr);
+    free(ptr); // Z3 should catch Double-Free here
+    return 0;
+}

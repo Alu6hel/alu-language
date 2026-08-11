@@ -1,0 +1,9 @@
+routine main() -> int {
+    int* ptr1 = new int;
+    int* ptr2 = ptr1; // Ownership moved to ptr2
+    
+    *ptr1 = 10; // Use-After-Move error!
+    
+    free(ptr2);
+    return 0;
+}

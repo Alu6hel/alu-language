@@ -1,0 +1,13 @@
+// ALU Test: @requires contract VIOLATED at call site.
+// Calling safe_divide(0) violates @requires(x > 0).
+// Expected: Z3 catches the violation and emits [ALU CXX Z3 FATAL].
+
+@requires(x > 0)
+routine safe_divide(int x) -> int {
+    return 100 / x;
+}
+
+routine main() -> int {
+    int val = safe_divide(0);
+    return 0;
+}

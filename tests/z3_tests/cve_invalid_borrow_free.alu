@@ -1,0 +1,12 @@
+routine borrow_func(int* ptr) -> int {
+    // Borrowed pointer should NOT be freed
+    free(ptr);
+    return 0;
+}
+
+routine main() -> int {
+    int* my_ptr = new int;
+    borrow_func(my_ptr);
+    free(my_ptr);
+    return 0;
+}

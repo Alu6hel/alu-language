@@ -9,20 +9,65 @@ extern routine fseek_c(string stream, int offset, int whence) -> int;
 extern routine ftell_c(string stream) -> int;
 extern routine feof_c(string stream) -> int;
 extern routine remove_c(string filename) -> int;
+extern routine fs_read_to_string_c(string path) -> string;
+extern routine fs_write_string_c(string path, string content) -> int;
+extern routine fs_append_string_c(string path, string content) -> int;
+extern routine fs_exists_c(string path) -> int;
+extern routine fs_size_c(string path) -> int;
+extern routine fputs_c(string str, string stream) -> int;
 
 // Wrappers
-routine fopen(string filename, string mode) -> string {
+routine fs_fopen(string filename, string mode) -> string {
     return fopen_c(filename, mode);
 }
 
-routine fread(string ptr, int size, string stream) -> int {
+routine fs_fread(string ptr, int size, string stream) -> int {
     return fread_c(ptr, 1, size, stream);
 }
 
-routine fwrite(string ptr, int size, string stream) -> int {
+routine fs_fwrite(string ptr, int size, string stream) -> int {
     return fwrite_c(ptr, 1, size, stream);
 }
 
-routine fclose(string stream) -> int {
+routine fs_fclose(string stream) -> int {
     return fclose_c(stream);
+}
+
+routine fs_read_file(string path) -> string {
+    return fs_read_to_string_c(path);
+}
+
+routine fs_write_file(string path, string content) -> int {
+    return fs_write_string_c(path, content);
+}
+
+routine fs_append_file(string path, string content) -> int {
+    return fs_append_string_c(path, content);
+}
+
+routine fs_exists(string path) -> int {
+    return fs_exists_c(path);
+}
+
+routine fs_size(string path) -> int {
+    return fs_size_c(path);
+}
+
+routine fs_remove(string path) -> int {
+    return remove_c(path);
+}
+
+routine fs_fputs(string str, string stream) -> int {
+    return fputs_c(str, stream);
+}
+
+// Legacy routines for compatibility
+routine read_file_legacy(string path_ptr, string buffer) -> int {
+    string f = fs_fopen(path_ptr, "rb");
+    int bytes = 0;
+    if (int(f) != 0) {
+        bytes = fs_fread(buffer, 1024 * 1024, f);
+        fs_fclose(f);
+    }
+    return bytes;
 }

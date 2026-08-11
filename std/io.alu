@@ -15,23 +15,9 @@ routine print(string s) -> void {
     puts(s);
 }
 
-// Binary File I/O
-extern routine fopen(string filename, string mode) -> string;
-extern routine fread(string ptr, int size, int count, string stream) -> int;
-extern routine fwrite(string ptr, int size, int count, string stream) -> int;
-extern routine fclose(string stream) -> int;
-extern routine fseek(string stream, int offset, int origin) -> int;
 
 // Legacy routines for compatibility
-routine read_file_legacy(string path_ptr, string buffer) -> int {
-    string f = fopen(path_ptr, "rb");
-    int bytes = 0;
-    if (int(f) != 0) {
-        bytes = fread(buffer, 1, 1024 * 1024, f);
-        fclose(f);
-    }
-    return bytes;
-}
+
 
 routine bind_socket_legacy(int port) -> int {
     unsafe {

@@ -1,0 +1,179 @@
+// ALU Native Standard Library: collections
+// Provides generic dynamic Vectors and HashMaps.
+
+import "std/mem.alu";
+import "std/string.alu";
+
+// ==========================================
+// Vector<T>
+// Dynamic array of elements of type T
+// ==========================================
+
+struct Vector<T> {
+    ptr<T> data;
+    int length;
+    int capacity;
+}
+
+routine vec_new<T>() -> ptr<Vector<T> > {
+    ptr<Vector<T> > v = new Vector<T>;
+    v.capacity = 16;
+    v.length = 0;
+    // Allocate max possible size per element (8 bytes) to accommodate any Alu type (pointer or primitive).
+    v.data = alu_alloc(16 * 8); 
+    return v;
+}
+
+routine vec_push<T>(ptr<Vector<T> > v, T item) -> void {
+    if (v.length == v.capacity) {
+        v.capacity = v.capacity * 2;
+        v.data = alu_realloc(v.data, v.capacity * 8);
+    }
+    ptr<T> d = v.data;
+    d[v.length] = item;
+    v.length = v.length + 1;
+}
+
+routine vec_get<T>(ptr<Vector<T> > v, int index) -> T {
+    ptr<T> d = v.data;
+    return d[index];
+}
+
+routine vec_set<T>(ptr<Vector<T> > v, int index, T item) -> void {
+    ptr<T> d = v.data;
+    d[index] = item;
+}
+
+routine vec_len<T>(ptr<Vector<T> > v) -> int {
+    return v.length;
+}
+
+// ==========================================
+// HashMap<K, V>
+// Simple Hash Map implementation
+// ==========================================
+
+struct HashEntry<K, V> {
+    K key;
+    V value;
+    int active;
+}
+
+struct HashMap<K, V> {
+    ptr<HashEntry<K, V> > buckets;
+    int capacity;
+    int size;
+}
+
+routine hash_string(string key) -> int {
+    int hash = 5381;
+    int len = strlen(key);
+    int i = 0;
+    while (i < len) {
+        // We do (hash * 33) + c
+        // Since we don't have byte access easily on string, wait, we can cast!
+        int c = key[i];
+        hash = (hash * 33) + c;
+        i = i + 1;
+    }
+    return hash;
+}
+
+routine hash_int(int key) -> int {
+    return key * 2654435761; // Knuth's multiplicative hash
+}
+
+// Generic hash map initialization
+routine map_new<K, V>() -> ptr<HashMap<K, V> > {
+    ptr<HashMap<K, V> > m = new HashMap<K, V>;
+    m.capacity = 64;
+    m.size = 0;
+    
+    // HashEntry has K, V, int. Max size could be 8 + 8 + 4 = 20, let's round up to 24 bytes.
+    m.buckets = alu_alloc(m.capacity * 8);
+    
+    // Initialize all to inactive
+    ptr<HashEntry<K, V> > b = m.buckets;
+    int i = 0;
+    while (i < m.capacity) {
+        HashEntry<K, V> e = new HashEntry<K, V>;
+        e.active = 0;
+        b[i] = e;
+        i = i + 1;
+    }
+    return m;
+}
+
+routine map_put_str_int(ptr<HashMap<string, int> > m, string key, int val) -> void {
+    if (m.size > (m.capacity / 2)) {
+        // resize logic could go here
+    }
+    
+    int h = hash_string(key);
+    if (h < 0) { h = 0 - h; }
+    int idx = h % m.capacity;
+    
+    ptr<HashEntry<string, int> > b = m.buckets;
+    HashEntry<string, int> e = b[idx];
+      int searching = 1;
+      while (searching == 1) {
+          if (e.active == 0) {
+              searching = 0;
+          } else {
+              if (strcmp(e.key, key) == 0) {
+                  searching = 0;
+              } else {
+                  idx = (idx + 1) % m.capacity;
+                  e = b[idx];
+              }
+          }
+      }
+    
+    if (e.active == 0) {
+        m.size = m.size + 1;
+    }
+    
+    e.key = key;
+    e.value = val;
+    e.active = 1;
+    b[idx] = e;
+}
+
+routine map_get_str_int(ptr<HashMap<string, int> > m, string key, int default_val) -> int {
+    int h = hash_string(key);
+    if (h < 0) { h = 0 - h; }
+    int idx = h % m.capacity;
+    
+    ptr<HashEntry<string, int> > b = m.buckets;
+    HashEntry<string, int> e = b[idx];
+    int start_idx = idx;
+    while (e.active == 1) {
+        if (strcmp(e.key, key) == 0) {
+            return e.value;
+        }
+        idx = (idx + 1) % m.capacity;
+        if (idx == start_idx) { return default_val; }
+        e = b[idx];
+    }
+    
+    return default_val;
+}
+
+routine map_contains_str_int(ptr<HashMap<string, int> > m, string key) -> int {
+    int h = hash_string(key);
+    if (h < 0) { h = 0 - h; }
+    int idx = h % m.capacity;
+    
+    ptr<HashEntry<string, int> > b = m.buckets;
+    HashEntry<string, int> e = b[idx];
+    int start_idx = idx;
+    while (e.active == 1) {
+        if (strcmp(e.key, key) == 0) {
+              return 1;
+        }
+        idx = (idx + 1) % m.capacity;
+          if (idx == start_idx) { return 0; }
+        e = b[idx];
+    }
+      return 0;
+}
