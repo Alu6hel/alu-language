@@ -1,0 +1,120 @@
+// ALU Standard Library: sync.alu
+// Synchronization primitives for safe concurrent access to shared data.
+
+// ─── Mutex ──────────────────────────────────────────────────────────────────
+// A mutual-exclusion lock. Only one thread may hold the lock at a time.
+
+// Create a new mutex. Returns a mutex handle (integer ID).
+extern routine sync_mutex_new() -> int;
+
+// Acquire the mutex, blocking until it becomes available.
+extern routine sync_mutex_lock(int mutex_id) -> void;
+
+// Release the mutex. Must be called by the thread that locked it.
+extern routine sync_mutex_unlock(int mutex_id) -> void;
+
+// Attempt to acquire the mutex without blocking.
+// Returns 1 if the lock was acquired, 0 if it was already held.
+extern routine sync_mutex_try_lock(int mutex_id) -> int;
+
+// Destroy the mutex and release its resources.
+extern routine sync_mutex_destroy(int mutex_id) -> void;
+
+// ─── Condition Variable ─────────────────────────────────────────────────────
+// Allows threads to wait for a predicate to become true.
+
+// Create a new condition variable. Returns a condvar handle (integer ID).
+extern routine sync_cond_new() -> int;
+
+// Atomically release the mutex and block until the condvar is signaled.
+// The mutex must be locked by the calling thread before calling this.
+// The mutex is re-acquired before this function returns.
+extern routine sync_cond_wait(int cond_id, int mutex_id) -> void;
+
+// Like sync_cond_wait, but returns after timeout_ms milliseconds.
+// Returns 1 if signaled, 0 if the timeout elapsed.
+extern routine sync_cond_wait_timeout(int cond_id, int mutex_id, int timeout_ms) -> int;
+
+// Wake one thread that is blocked on the condition variable.
+extern routine sync_cond_signal(int cond_id) -> void;
+
+// Wake all threads that are blocked on the condition variable.
+extern routine sync_cond_broadcast(int cond_id) -> void;
+
+// Destroy the condition variable and release its resources.
+extern routine sync_cond_destroy(int cond_id) -> void;
+
+// ─── Read-Write Lock ────────────────────────────────────────────────────────
+// Allows multiple concurrent readers OR a single exclusive writer.
+
+// Create a new read-write lock. Returns an rwlock handle (integer ID).
+extern routine sync_rwlock_new() -> int;
+
+// Acquire a shared (read) lock. Multiple readers may hold this simultaneously.
+extern routine sync_rwlock_read_lock(int rwlock_id) -> void;
+
+// Release a shared (read) lock.
+extern routine sync_rwlock_read_unlock(int rwlock_id) -> void;
+
+// Acquire an exclusive (write) lock. Blocks until all readers and writers release.
+extern routine sync_rwlock_write_lock(int rwlock_id) -> void;
+
+// Release an exclusive (write) lock.
+extern routine sync_rwlock_write_unlock(int rwlock_id) -> void;
+
+// Destroy the read-write lock and release its resources.
+extern routine sync_rwlock_destroy(int rwlock_id) -> void;
+
+// ─── Barrier ────────────────────────────────────────────────────────────────
+// Blocks a group of threads until all of them have reached the barrier.
+
+// Create a barrier for `count` threads. Returns a barrier handle (integer ID).
+extern routine sync_barrier_new(int count) -> int;
+
+// Block the calling thread until `count` threads have called barrier_wait.
+// Returns 1 for the last thread to arrive (the "serial thread"), 0 for others.
+extern routine sync_barrier_wait(int barrier_id) -> int;
+
+// Destroy the barrier and release its resources.
+extern routine sync_barrier_destroy(int barrier_id) -> void;
+
+// ─── Semaphore ──────────────────────────────────────────────────────────────
+// A counting semaphore for controlling access to a finite number of resources.
+
+// Create a semaphore with the given initial count. Returns a handle (integer ID).
+extern routine sync_semaphore_new(int initial) -> int;
+
+// Decrement the semaphore. Blocks if the count is zero until another thread posts.
+extern routine sync_semaphore_wait(int sem_id) -> void;
+
+// Increment the semaphore, potentially unblocking a waiting thread.
+extern routine sync_semaphore_post(int sem_id) -> void;
+
+// Non-blocking try: returns 1 if the semaphore was decremented, 0 otherwise.
+extern routine sync_semaphore_try_wait(int sem_id) -> int;
+
+// Destroy the semaphore and release its resources.
+extern routine sync_semaphore_destroy(int sem_id) -> void;
+
+// ─── Atomics ────────────────────────────────────────────────────────────────
+// Lock-free atomic operations on integer pointers.  All use sequential
+// consistency (strongest memory ordering).
+
+// Atomically load the value at the pointer.
+extern routine sync_atomic_load(ptr<int> p) -> int;
+
+// Atomically store `val` at the pointer.
+extern routine sync_atomic_store(ptr<int> p, int val) -> void;
+
+// Atomically add `val` to *p and return the OLD value.
+extern routine sync_atomic_add(ptr<int> p, int val) -> int;
+
+// Atomically subtract `val` from *p and return the OLD value.
+extern routine sync_atomic_sub(ptr<int> p, int val) -> int;
+
+// Compare-and-swap: if *p == expected, store desired and return expected.
+// Otherwise return the current value of *p without modifying it.
+extern routine sync_atomic_cas(ptr<int> p, int expected, int desired) -> int;
+
+// Atomically exchange: store `val` at *p and return the OLD value.
+extern routine sync_atomic_exchange(ptr<int> p, int val) -> int;

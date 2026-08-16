@@ -513,6 +513,8 @@ std::string LLVMCodeGen::getLLVMType(const std::string& type) {
     if (type == "bool") return "i1";
     if (type == "void") return "void";
     if (type == "byte") return "i8";
+    if (type == "routine") return "i8*";
+    if (type == "routine") return "i8*";
     if (type.find("[]") != std::string::npos) {
         std::string base = type.substr(0, type.find("[]"));
         if (base == "int") return "i32*";
@@ -607,9 +609,12 @@ std::string LLVMCodeGen::visit(VarAccessNode* node) {
 
 std::string LLVMCodeGen::visit(AddressOfNode* node) {
     if (emit_debug_info) current_debug_node = node;
-    // AddressOf only makes sense for variables or fields.
-    // For local vars, we just return the alloca name as a value (no load).
+    // AddressOf only makes sense for variables, fields, or functions.
     if (auto varNode = dynamic_cast<VarAccessNode*>(node->expr.get())) {
+        std::string nName = getNamespacedName(varNode->name);
+        if (func_signatures.find(nName) != func_signatures.end() || func_return_types.find(nName) != func_return_types.end()) {
+            return "@" + sanitizeLLVMName(nName);
+        }
         return "%" + lookupIRName(varNode->name);
     }
     return "0"; // Advanced address-of not fully implemented
@@ -913,37 +918,7 @@ std::string LLVMCodeGen::visit(MethodCallNode* node) {
     for (size_t i = 0; i < node->args.size(); ++i) {
         args_str += ", ";
         
-        if (auto lit = dynamic_cast<LiteralNode*>(node->args[i].get())) {
-            if (lit->type == DataType::STRING) {
-                std::string text = lit->value;
-                std::string processed_text = "";
-                for (size_t k = 0; k < text.length(); ++k) {
-                    if (text[k] == '\\' && k + 1 < text.length() && text[k+1] == 'n') {
-                        processed_text += "\\0A";
-                        k++;
-                    } else {
-                        processed_text += text[k];
-                    }
-                }
-                
-                std::string str_val = "c\"" + processed_text + "\\00\"";
-                int byte_len = 1; 
-                for (size_t k = 0; k < text.length(); ++k) {
-                    if (text[k] == '\\' && k + 1 < text.length() && text[k+1] == 'n') {
-                        byte_len++; k++;
-                    } else { byte_len++; }
-                }
-                
-                std::string reg = getTempReg();
-                emit("  " + reg + " = alloca [" + std::to_string(byte_len) + " x i8], align 1");
-                emit("  store [" + std::to_string(byte_len) + " x i8] " + str_val + ", [" + std::to_string(byte_len) + " x i8]* " + reg + ", align 1");
-                std::string ptr_reg = getTempReg();
-                emit("  " + ptr_reg + " = bitcast [" + std::to_string(byte_len) + " x i8]* " + reg + " to i8*");
-                
-                args_str += "i8* " + ptr_reg;
-                continue;
-            }
-        }
+
         
         std::string arg_val = evaluateExpression(node->args[i].get());
         std::string arg_type = getInferredLLVMType(node->args[i].get());
@@ -1348,46 +1323,7 @@ std::string LLVMCodeGen::visit(FuncCallNode* node) {
     std::vector<bool> arg_is_arc_ptr;
     
     for (const auto& arg : node->args) {
-        if (auto lit = dynamic_cast<LiteralNode*>(arg.get())) {
-            if (lit->type == DataType::STRING) {
-                // We need to inline allocate the string for LLVM IR
-                std::string text = lit->value;
-                
-                // Replace \n with \0A for LLVM IR string literal
-                std::string processed_text = "";
-                for (size_t k = 0; k < text.length(); ++k) {
-                    if (text[k] == '\\' && k + 1 < text.length() && text[k+1] == 'n') {
-                        processed_text += "\\0A";
-                        k++;
-                    } else {
-                        processed_text += text[k];
-                    }
-                }
-                
-                std::string str_val = "c\"" + processed_text + "\\00\"";
-                int byte_len = 1; // for \0
-                for (size_t k = 0; k < text.length(); ++k) {
-                    if (text[k] == '\\' && k + 1 < text.length() && text[k+1] == 'n') {
-                        byte_len++;
-                        k++;
-                    } else {
-                        byte_len++;
-                    }
-                }
-                
-                std::string reg = getTempReg();
-                emit("  " + reg + " = alloca [" + std::to_string(byte_len) + " x i8], align 1");
-                emit("  store [" + std::to_string(byte_len) + " x i8] " + str_val + ", [" + std::to_string(byte_len) 
-+ " x i8]* " + reg + ", align 1");
-                std::string ptr_reg = getTempReg();
-                emit("  " + ptr_reg + " = bitcast [" + std::to_string(byte_len) + " x i8]* " + reg + " to i8*");
-                
-                arg_vals.push_back(ptr_reg);
-                arg_types.push_back("i8*");
-                arg_is_arc_ptr.push_back(false); // Static string, no ARC
-                continue;
-            }
-        }
+
         
         std::string arg_val = evaluateExpression(arg.get());
         std::string arg_type = getInferredLLVMType(arg.get());
@@ -1779,18 +1715,34 @@ void LLVMCodeGen::visit(ProgramNode* node) {
     emit("; ModuleID = 'alu_module'");
     emit("source_filename = \"alu_source.alu\"");
     
-    if (target_arch == "vulkan") {
-        emit("target datalayout = \"e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024\"");
+    if (target_arch.find("spirv") != std::string::npos || target_arch == "vulkan") {
+        emit("target datalayout = \"e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024\"");
         emit("target triple = \"spirv64-unknown-unknown\"\n");
-    } else if (target_arch == "metal") {
+    } else if (target_arch.find("air64") != std::string::npos || target_arch == "metal") {
         emit("target datalayout = \"e-m:o-i64:64-f80:128-n8:16:32:64-S128\"");
         emit("target triple = \"air64-apple-macosx\"\n");
-    } else if (target_arch == "wasm") {
+    } else if (target_arch.find("wasm") != std::string::npos) {
         emit("target datalayout = \"e-m:e-p:32:32-i64:64-n32:64-S128\"");
-        emit("target triple = \"wasm32-unknown-emscripten\"\n");
+        emit("target triple = \"" + target_arch + "\"\n");
+    } else if (target_arch.find("aarch64") != std::string::npos || target_arch.find("arm64") != std::string::npos) {
+        if (target_arch.find("apple") != std::string::npos) {
+            emit("target datalayout = \"e-m:o-i64:64-i128:128-n32:64-S128\"");
+        } else {
+            emit("target datalayout = \"e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128\"");
+        }
+        emit("target triple = \"" + target_arch + "\"\n");
+    } else if (target_arch.find("arm") != std::string::npos) {
+        emit("target datalayout = \"e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64\"");
+        emit("target triple = \"" + target_arch + "\"\n");
     } else {
-        emit("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"");
-        emit("target triple = \"x86_64-pc-windows-msvc\"\n");
+        if (target_arch.find("apple") != std::string::npos) {
+            emit("target datalayout = \"e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"");
+        } else if (target_arch.find("linux") != std::string::npos) {
+            emit("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"");
+        } else {
+            emit("target datalayout = \"e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"");
+        }
+        emit("target triple = \"" + target_arch + "\"\n");
     }
     
     // Memory allocation for exceptions

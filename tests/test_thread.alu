@@ -1,0 +1,13 @@
+import "std/thread.alu";
+import "std/io.alu";
+routine my_thread() {
+    print("Inside thread!\n");
+}
+
+routine main() -> int {
+    print("Starting thread...\n");
+    int t = thread_spawn(&my_thread);
+    thread_join(t);
+    print("Thread finished.\n");
+    return 0;
+}

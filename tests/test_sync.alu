@@ -1,0 +1,33 @@
+import "std/thread.alu";
+import "std/sync.alu";
+import "std/io.alu";
+
+routine my_thread() {
+    // Mutex ID matches what main allocated (first mutex = ID 1)
+    sync_mutex_lock(1);
+    print("Thread acquired mutex!\n");
+    sync_mutex_unlock(1);
+}
+
+routine main() -> int {
+    print("Starting sync test...\n");
+    
+    int mtx = sync_mutex_new();  // Returns 1
+    
+    // Acquire the mutex first
+    sync_mutex_lock(mtx);
+    
+    int t = thread_spawn(&my_thread);
+    
+    print("Main thread holding mutex...\n");
+    
+    // Simulate some work
+    
+    print("Main thread releasing mutex...\n");
+    sync_mutex_unlock(mtx);
+    
+    thread_join(t);
+    
+    print("Sync test finished.\n");
+    return 0;
+}

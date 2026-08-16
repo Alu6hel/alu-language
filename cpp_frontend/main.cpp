@@ -22,6 +22,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::vector<std::string> inputFiles;
+    std::vector<std::string> extraLinkObjects;
     std::string command = "build";
     std::string targetTriple = "";
     bool createXcframework = false;
@@ -30,6 +31,13 @@ int main(int argc, char* argv[]) {
     std::string stdPath = ""; // Will be auto-detected if not set
     bool emit_debug_info = false;
     
+    auto hasExtension = [](const std::string& path, const std::string& ext) {
+        if (path.length() >= ext.length()) {
+            return (0 == path.compare(path.length() - ext.length(), ext.length(), ext));
+        }
+        return false;
+    };
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg.find("--target=") == 0) {
@@ -44,10 +52,14 @@ int main(int argc, char* argv[]) {
             stdPath = argv[++i];
         } else if (arg == "-g" || arg == "--debug") {
             emit_debug_info = true;
-        } else if (i == 1 && (arg == "install" || arg == "build")) {
+        } else if (i == 1 && (arg == "install" || arg == "build" || arg == "bindgen")) {
             command = arg;
         } else {
-            inputFiles.push_back(arg);
+            if (hasExtension(arg, ".o") || hasExtension(arg, ".obj") || hasExtension(arg, ".a") || hasExtension(arg, ".lib") || hasExtension(arg, ".c")) {
+                extraLinkObjects.push_back(arg);
+            } else {
+                inputFiles.push_back(arg);
+            }
         }
     }
     
@@ -69,12 +81,21 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    bool targetAndroid = (targetTriple == "aarch64-linux-android");
-    bool targetWasm = (targetTriple == "wasm32-unknown-emscripten");
-    bool targetVulkan = (targetTriple == "spirv64-unknown-unknown");
-    bool targetMetal = (targetTriple == "air64-apple-macos");
+    // Resolve target aliases
+    if (targetTriple == "wasm32") targetTriple = "wasm32-unknown-emscripten";
+    else if (targetTriple == "arm64" || targetTriple == "aarch64") targetTriple = "aarch64-unknown-linux-gnu";
+    else if (targetTriple == "android") targetTriple = "aarch64-linux-android";
+    else if (targetTriple == "ios") targetTriple = "aarch64-apple-ios";
+    else if (targetTriple == "ios-sim") targetTriple = "x86_64-apple-ios-simulator";
+    else if (targetTriple == "x86_64") targetTriple = "x86_64-pc-windows-msvc";
+    else if (targetTriple.empty()) targetTriple = "x86_64-pc-windows-msvc"; // Default
+
+    bool targetAndroid = (targetTriple.find("-android") != std::string::npos);
+    bool targetWasm = (targetTriple.find("wasm32") != std::string::npos);
+    bool targetVulkan = (targetTriple.find("spirv") != std::string::npos);
+    bool targetMetal = (targetTriple.find("air64") != std::string::npos);
     bool targetIos = (targetTriple == "aarch64-apple-ios");
-    bool targetIosSim = (targetTriple == "x86_64-apple-ios-simulator" || targetTriple == "aarch64-apple-ios-simulator");
+    bool targetIosSim = (targetTriple.find("-ios-simulator") != std::string::npos);
 
     // XCFramework logic
     if (createXcframework) {
@@ -144,6 +165,20 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    if (command == "bindgen") {
+        std::string exeDir = ModuleLinker::getDirectory(argv[0]);
+        std::string bindgenExe = exeDir + "/alu_bindgen.exe";
+        if (!fileExists(bindgenExe)) {
+            bindgenExe = "alu_bindgen";
+        }
+        std::string cmd = bindgenExe;
+        for (int i = 2; i < argc; ++i) {
+            cmd += " ";
+            cmd += argv[i];
+        }
+        return std::system(cmd.c_str());
+    }
+
     if (inputFiles.empty()) {
         std::cerr << "Error: No input file specified." << std::endl;
         return 1;
@@ -206,12 +241,7 @@ int main(int argc, char* argv[]) {
         
         std::cout << "[ALU CXX] Ready for LLVM IR Translation." << std::endl;
         
-        std::string targetArchStr = "x86_64";
-        if (targetWasm) targetArchStr = "wasm";
-        if (targetVulkan) targetArchStr = "vulkan";
-        if (targetMetal) targetArchStr = "metal";
-        
-        LLVMCodeGen codegen(targetArchStr);
+        LLVMCodeGen codegen(targetTriple);
         codegen.emit_debug_info = emit_debug_info;
         ast->codegen(codegen);
         std::string mainFile = inputFiles[0];
@@ -331,7 +361,7 @@ int main(int argc, char* argv[]) {
         
         std::string compileCommand;
         if (targetWasm) {
-            compileCommand = "emcc -O3 -s WASM=1 -s EXPORTED_FUNCTIONS=\"['_process_image', '_apply_filter']\" -o " + outBinFilename + " " + outFilename + " std/image_backend.cpp std/yara_backend.cpp";
+            compileCommand = "emcc -O3 -s WASM=1 -s EXPORTED_FUNCTIONS=\"['_process_image', '_apply_filter']\" -o " + outBinFilename + " " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp";
         } else if (targetAndroid) {
             std::string resolvedNdk = ndkPath;
             if (resolvedNdk.empty()) {
@@ -346,21 +376,27 @@ int main(int argc, char* argv[]) {
                 }
             }
             std::string clangPath = resolvedNdk + "\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\aarch64-linux-android30-clang++";
-            compileCommand = clangPath + " -shared -fPIC -o " + outBinFilename + " " + outFilename + " jni_bridge.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp -lcrypto -lssl";
+            compileCommand = clangPath + " -shared -fPIC -o " + outBinFilename + " " + outFilename + " jni_bridge.cpp std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp -lcrypto -lssl";
         } else if (targetVulkan) {
             compileCommand = "llvm-spirv -o " + outBinFilename + " " + outFilename;
         } else if (targetMetal) {
             compileCommand = "xcrun -sdk macosx metal -c " + outFilename + " -o " + baseFilename + ".air && xcrun -sdk macosx metallib " + baseFilename + ".air -o " + outBinFilename;
         } else if (targetIos) {
             std::string objFile = baseFilename + "-arm64.o";
-            compileCommand = "clang -x ir " + outFilename + " std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+            compileCommand = "clang -x ir " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
         } else if (targetIosSim) {
             std::string arch = (targetTriple == "aarch64-apple-ios-simulator") ? "arm64" : "x86_64";
             std::string objFile = baseFilename + "-" + arch + "-sim.o";
-            compileCommand = "clang -x ir " + outFilename + " std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+            compileCommand = "clang -x ir " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
         } else {
             std::string opt_flag = emit_debug_info ? "-O0 -g" : "-O3";
-            compileCommand = "clang++ " + opt_flag + " -o " + outBinFilename + " " + outFilename + " std/fs_backend.cpp std/net_backend.cpp std/crypto_backend.cpp std/image_backend.cpp -lws2_32";
+            compileCommand = "clang++ " + opt_flag + " -o " + outBinFilename + " " + outFilename + " \"" + stdPath + "/std/fs_backend.cpp\" \"" + stdPath + "/std/net_backend.cpp\" \"" + stdPath + "/std/crypto_backend.cpp\" \"" + stdPath + "/std/string_backend.cpp\" \"" + stdPath + "/std/image_backend.cpp\" \"" + stdPath + "/std/thread_backend.cpp\" -lws2_32";
+            for (size_t i = 1; i < inputFiles.size(); ++i) {
+                compileCommand += " \"" + inputFiles[i] + "\"";
+            }
+            for (const auto& obj : extraLinkObjects) {
+                compileCommand += " \"" + obj + "\"";
+            }
         }
         
         int result = std::system(compileCommand.c_str());

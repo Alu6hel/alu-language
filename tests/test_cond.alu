@@ -1,0 +1,37 @@
+import "std/thread.alu";
+import "std/sync.alu";
+import "std/io.alu";
+
+routine my_thread() {
+    print("Worker thread started.\n");
+    // Wait for main thread to enter condition wait
+    sleep_ms(500);
+    
+    // IDs match those allocated in main: mutex=1, cond=1
+    sync_mutex_lock(1);
+    print("Worker thread signaling condition...\n");
+    sync_cond_signal(1);
+    sync_mutex_unlock(1);
+}
+
+routine main() -> int {
+    print("Starting condition variable test...\n");
+    
+    int mtx = sync_mutex_new();   // Returns 1
+    int cond = sync_cond_new();   // Returns 1
+    
+    int t = thread_spawn(&my_thread);
+    
+    sync_mutex_lock(mtx);
+    print("Main thread waiting on condition...\n");
+    
+    sync_cond_wait(cond, mtx);
+    
+    print("Main thread woke up!\n");
+    sync_mutex_unlock(mtx);
+    
+    thread_join(t);
+    
+    print("Condition variable test finished.\n");
+    return 0;
+}

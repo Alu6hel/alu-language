@@ -1,16 +1,27 @@
 // ALU Standard Library: thread.alu
-// MapReduce scatter-gather threading primitives
+// Threading primitives for spawning and managing OS threads.
 
-extern "C" thread_spawn(fn_ptr: ptr<routine>) -> u64
-extern "C" thread_join(thread_id: u64)
+// Spawn a new thread that executes the given routine.
+// Returns a thread handle (integer ID) used to join or detach the thread.
+extern routine thread_spawn(ptr<routine> fn_ptr) -> int;
 
-routine scatter(workers: u32, fn_ptr: ptr<routine>) -> ptr<u64> {
-    prove { workers > 0 }
-    // Implements parallel Map logic
-    return null // Stub
-}
+// Block the calling thread until the target thread has finished execution.
+// After joining, the thread handle is invalidated.
+extern routine thread_join(int thread_id) -> void;
 
-routine gather(thread_ids: ptr<u64>, count: u32) {
-    prove { count > 0 }
-    // Implements Reduce logic
-}
+// Detach the thread so it runs independently. Its resources are released
+// automatically when it finishes. After detaching, the handle is invalidated.
+extern routine thread_detach(int thread_id) -> void;
+
+// Return a unique integer ID for the calling thread.
+extern routine thread_current_id() -> int;
+
+// Yield the calling thread's remaining time slice to the OS scheduler.
+extern routine thread_yield() -> void;
+
+// Return the number of concurrent hardware threads supported by the system
+// (typically the number of CPU cores/hyperthreads). Returns 1 if unknown.
+extern routine thread_hardware_concurrency() -> int;
+
+// Suspend the calling thread for the specified number of milliseconds.
+extern routine sleep_ms(int ms) -> void;

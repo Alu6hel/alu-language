@@ -1,0 +1,26 @@
+import std::io;
+
+effect Gen {
+    routine yield_val(int v) -> void;
+}
+
+routine do_stuff() -> void {
+    puts("child: yielding 1");
+    yield Gen.yield_val(1);
+    puts("child: yielding 2");
+    yield Gen.yield_val(2);
+    puts("child: done");
+}
+
+routine main() -> int {
+    puts("parent: starting");
+    handle Gen {
+        on yield_val(int v) {
+            puts("parent: got value");
+            // how do we get v?
+            resume(0);
+        }
+    } in do_stuff();
+    puts("parent: done");
+    return 0;
+}

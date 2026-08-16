@@ -1,0 +1,26 @@
+// ──────────────────────────────────────────────────────────────────────────────
+// ALU Standard Library: std/bindgen.alu
+// FFI (Foreign Function Interface) Utilities and Binding Helpers
+// ──────────────────────────────────────────────────────────────────────────────
+
+extern routine malloc(u64 size) -> void*;
+extern routine free(ptr<u8> ptr) -> void;
+extern routine strlen(string s) -> u64;
+extern routine strcpy(ptr<u8> dest, string src) -> ptr<u8>;
+
+// Allocates a C-compatible zero-terminated string from an Alu string
+routine string_to_c_str(s: string) -> ptr<u8> {
+    assert(s != null);
+    u64 len = strlen(s);
+    ptr<u8> cstr = cast<ptr<u8>>(malloc(len + 1));
+    assert(cstr != null);
+    strcpy(cstr, s);
+    return cstr;
+}
+
+// Frees memory allocated for a C string
+routine free_c_str(cstr: ptr<u8>) {
+    if (cstr != null) {
+        free(cstr);
+    }
+}

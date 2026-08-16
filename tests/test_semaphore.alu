@@ -1,0 +1,42 @@
+import "std/thread.alu";
+import "std/sync.alu";
+import "std/io.alu";
+
+routine producer_thread() {
+    int sem = 1;  // semaphore ID from main
+    int i = 0;
+    while (i < 3) {
+        sleep_ms(50);
+        printf("  Producer posting item %d\n", i);
+        sync_semaphore_post(sem);
+        i = i + 1;
+    }
+}
+
+routine consumer_thread() {
+    int sem = 1;  // semaphore ID from main
+    int i = 0;
+    while (i < 3) {
+        sync_semaphore_wait(sem);
+        printf("  Consumer received item %d\n", i);
+        i = i + 1;
+    }
+}
+
+routine main() -> int {
+    print("=== Semaphore Test ===\n");
+
+    // Create a semaphore with initial count 0 (empty buffer)
+    int sem = sync_semaphore_new(0);
+    printf("Created semaphore with ID: %d\n", sem);
+
+    int prod = thread_spawn(&producer_thread);
+    int cons = thread_spawn(&consumer_thread);
+
+    thread_join(prod);
+    thread_join(cons);
+
+    sync_semaphore_destroy(sem);
+    print("=== Semaphore test finished ===\n");
+    return 0;
+}

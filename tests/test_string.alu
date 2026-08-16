@@ -1,0 +1,53 @@
+import std::string;
+import std::io;
+import std::collections;
+
+routine main() -> int {
+    string s = "Hello, ALU world! This is a test.";
+    
+    // Substring
+    string sub = alu_string_substr(s, 7, 3);
+    println("Substring (7, 3): ");
+    println(sub);
+    
+    // Replace
+    string rep = alu_string_replace(s, "ALU", "C++");
+    println("Replaced: ");
+    println(rep);
+    
+    // Find
+    int idx = alu_string_find(s, "world", 0);
+    print("Index of world: ");
+    print_int(idx);
+    
+    // Regex match
+    int is_match = alu_regex_match("abc123def", "^[a-z]+[0-9]+[a-z]+$");
+    print("\nRegex match: ");
+    print_int(is_match);
+    
+    // Regex search
+    int has_search = alu_regex_search("my email is test@example.com, thanks", "[a-z]+@[a-z]+\\.[a-z]+");
+    print("\nRegex search: ");
+    print_int(has_search);
+    
+    // Regex replace
+    string reg_rep = alu_regex_replace("Phone: 123-456-7890", "[0-9]{3}", "XXX");
+    println("\nRegex replaced: ");
+    println(reg_rep);
+    
+    // String split
+    ptr<Vector<string> > parts = string_split("apple,banana,cherry", ",");
+    print("\nSplit parts: ");
+    print_int(vec_len<string>(parts));
+    println("");
+    
+    int i = 0;
+    int n = vec_len<string>(parts);
+    while (i < n) {
+        string p = vec_get<string>(parts, i);
+        println(p);
+        i = i + 1;
+    }
+    
+    return 0;
+}

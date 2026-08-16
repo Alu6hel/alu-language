@@ -25,3 +25,11 @@ routine bind_socket_legacy(int port) -> int {
     }
     return 0;
 }
+
+routine println(string s) -> void {
+    printf("%s\n", s);
+}
+
+routine print_int(int i) -> void {
+    printf("%d", i);
+}

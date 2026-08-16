@@ -1,8 +1,8 @@
 // ALU Native Standard Library: collections
 // Provides generic dynamic Vectors and HashMaps.
 
-import "std/mem.alu";
-import "std/string.alu";
+import std::mem;
+import std::string;
 
 // ==========================================
 // Vector<T>

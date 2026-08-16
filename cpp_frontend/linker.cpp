@@ -95,7 +95,7 @@ void ModuleLinker::resolveImports(ProgramNode* ast, const std::string& currentDi
                     throw std::runtime_error(errMsg);
                 }
                 
-                std::cerr << "[ALU CXX Linker] Resolving module: " << importNode->moduleName 
+                std::cerr << "[ALU CXX Linker] Resolving module: " << importNode->moduleName << " -> " << resolvedPath 
                           << " -> " << resolvedPath << std::endl;
                 
                 std::stringstream mb; mb << mf.rdbuf();

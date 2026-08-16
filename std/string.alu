@@ -1,5 +1,7 @@
 // ALU Native Standard Library: string
 // Bindings to libc <string.h>
+import std::collections;
+
 
 extern routine strlen(string s) -> int;
 extern routine strcpy(string dest, string src) -> string;
@@ -9,3 +11,27 @@ extern routine strncmp(string s1, string s2, int n) -> int;
 extern routine strcat(string dest, string src) -> string;
 extern routine strchr(string s, int c) -> string;
 extern routine strstr(string haystack, string needle) -> string;
+
+extern routine alu_string_substr(string s, int start, int len) -> string;
+extern routine alu_string_replace(string s, string search, string replace) -> string;
+extern routine alu_string_find(string s, string search, int start) -> int;
+extern routine alu_regex_match(string s, string pattern) -> int;
+extern routine alu_regex_search(string s, string pattern) -> int;
+extern routine alu_regex_replace(string s, string pattern, string replace) -> string;
+
+routine string_split(string s, string delim) -> ptr<Vector<string> > {
+    ptr<Vector<string> > parts = vec_new<string>();
+    int start = 0;
+    int idx = alu_string_find(s, delim, start);
+    int s_len = strlen(s);
+    int d_len = strlen(delim);
+    while (idx != 0 - 1) {
+        string p = alu_string_substr(s, start, idx - start);
+        vec_push<string>(parts, p);
+        start = idx + d_len;
+        idx = alu_string_find(s, delim, start);
+    }
+    string last_p = alu_string_substr(s, start, s_len - start);
+    vec_push<string>(parts, last_p);
+    return parts;
+}

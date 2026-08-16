@@ -1,0 +1,31 @@
+import "std/thread.alu";
+import "std/sync.alu";
+import "std/io.alu";
+
+routine barrier_worker() {
+    int bar = 1;  // barrier ID from main
+    int tid = thread_current_id();
+    printf("  Thread %d arriving at barrier...\n", tid);
+    int is_serial = sync_barrier_wait(bar);
+    printf("  Thread %d passed barrier (serial=%d)\n", tid, is_serial);
+}
+
+routine main() -> int {
+    print("=== Barrier Test ===\n");
+
+    // Create a barrier for 3 threads (workers only; main doesn't wait)
+    int bar = sync_barrier_new(3);
+    printf("Created barrier with ID: %d (threshold=3)\n", bar);
+
+    int t1 = thread_spawn(&barrier_worker);
+    int t2 = thread_spawn(&barrier_worker);
+    int t3 = thread_spawn(&barrier_worker);
+
+    thread_join(t1);
+    thread_join(t2);
+    thread_join(t3);
+
+    sync_barrier_destroy(bar);
+    print("=== Barrier test finished ===\n");
+    return 0;
+}

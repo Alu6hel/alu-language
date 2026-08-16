@@ -1,5 +1,5 @@
-import "std/collections.alu";
-import "std/io.alu";
+import std::collections;
+import std::io;
 
 routine main() -> int {
     puts("--- Testing Vector<int> ---");
@@ -34,7 +34,7 @@ routine main() -> int {
     map_put_str_int(map, "hello", 100);
     map_put_str_int(map, "world", 200);
     
-    if (map_contains_str_int(map, "hello")) {
+    if (map_contains_str_int(map, "hello") == 1) {
         puts("[PASS] HashMap contains 'hello'");
     } else {
         puts("[FAIL] HashMap contains 'hello'");

@@ -122,14 +122,14 @@ void SemanticAnalyzer::instantiateTemplateIfNeeded(const std::string& typeStr) {
         throw std::runtime_error("Template arg count mismatch for " + typeStr);
     }
     
+    std::map<std::string, std::string> type_map;
+    for (size_t i = 0; i < args.size(); ++i) {
+        type_map[tmpl->type_params[i]] = args[i];
+    }
+    
     std::vector<StructField> new_fields;
     for (const auto& f : tmpl->fields) {
-        std::string new_type = f.type;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (new_type == tmpl->type_params[i]) {
-                new_type = args[i];
-            }
-        }
+        std::string new_type = replaceTypeVars(f.type, type_map);
         new_fields.push_back({new_type, f.name});
     }
     
@@ -140,11 +140,21 @@ void SemanticAnalyzer::instantiateTemplateIfNeeded(const std::string& typeStr) {
     info.fields = new_fields;
     struct_table[typeStr] = info;
     
-    current_ast->declarations.push_back(std::move(new_struct));
+    
+      std::cerr << "[DEBUG] INSTANTIATED TEMPLATE: " << typeStr << " FIELDS: ";
+      for(const auto& f : new_fields) std::cerr << f.name << " : " << f.type << " ; ";
+      std::cerr << std::endl;
+      
+      std::cerr << "[DEBUG] INSTANTIATED TEMPLATE: " << typeStr << " FIELDS: ";
+      for(const auto& f : new_fields) std::cerr << f.name << " : " << f.type << " ; ";
+      std::cerr << std::endl;
+      current_ast->declarations.push_back(std::move(new_struct));
+
+
 }
 
 DataType SemanticAnalyzer::parseDataType(const std::string& rawTypeStr) {
-    std::string typeStr = resolveName(rawTypeStr);
+        std::string typeStr = resolveName(rawTypeStr);
     instantiateTemplateIfNeeded(typeStr);
     std::string base = typeStr;
     bool isPointer = false;
@@ -285,6 +295,10 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
             if (lookupStructVar(varNode->name, sn)) {
                 return parseDataType(sn);
             }
+            if (struct_table.find(varNode->name) != struct_table.end()) {
+                // It's an effect or raw struct type access, return a generic pointer type for now
+                return DataType::POINTER;
+            }
             if (!is_lsp_mode) { std::cerr << "VarAccess Error: " << varNode->name << std::endl; }
             throw std::runtime_error("Semantic Error: Undefined variable '" + varNode->name + "'");
         }
@@ -324,9 +338,18 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         }
         std::string structName = "";
         if (auto varNode = dynamic_cast<VarAccessNode*>(methodCall->object.get())) {
-            lookupStructVar(varNode->name, structName);
+            if (!lookupStructVar(varNode->name, structName)) {
+                // Check if it's an effect or other type directly (e.g. Gen.yield_val)
+                if (struct_table.find(varNode->name) != struct_table.end()) {
+                    structName = varNode->name;
+                }
+            }
         }
         std::string mangledName = structName + "_" + methodCall->methodName;
+        // In effects, the effect name might not be prefixed with _, let's check for the exact method name if struct_method fails
+        if (function_table.find(mangledName) == function_table.end() && function_table.find(methodCall->methodName) != function_table.end()) {
+            mangledName = methodCall->methodName;
+        }
         if (function_table.find(mangledName) != function_table.end()) {
             if (is_lsp_mode) {
                 FunctionSignature& sig = function_table[mangledName];
@@ -404,7 +427,12 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     
     std::string sn;
     if (expectedType == DataType::UNKNOWN && !lookupStructVar(decl->name, sn)) {
-        throw std::runtime_error("Semantic Error: Unknown variable type '" + decl->varType + "'");
+        if (struct_table.find(decl->varType) != struct_table.end()) {
+            // It's a struct/effect that isn't a pointer, but declared locally
+            declareStructVar(decl->name, decl->varType);
+        } else {
+            throw std::runtime_error("Semantic Error: Unknown variable type '" + decl->varType + "'");
+        }
     }
     
     // Check if variable is already defined IN THE CURRENT SCOPE ONLY
@@ -713,11 +741,15 @@ void SemanticAnalyzer::checkProgram(ProgramNode* node) {
 }
 
 void SemanticAnalyzer::checkDeclarations(const std::vector<std::unique_ptr<ASTNode>>& declarations) {
-    // First pass: Register structs and routines
     for (size_t i = 0; i < declarations.size(); ++i) {
         auto* decl = declarations[i].get();
         if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
             routine->name = prefixName(routine->name);
+            if (!routine->type_params.empty()) {
+                routine_templates[routine->name] = routine;
+                continue;
+            }
+
             routine->returnType = resolveName(routine->returnType);
             FunctionSignature sig;
             sig.returnType = parseDataType(routine->returnType);
@@ -753,6 +785,24 @@ void SemanticAnalyzer::checkDeclarations(const std::vector<std::unique_ptr<ASTNo
                 info.fields = structDef->fields;
                 struct_table[structDef->name] = info;
             }
+        } else if (auto effectNode = dynamic_cast<EffectDeclNode*>(decl)) {
+            effectNode->name = prefixName(effectNode->name);
+            // For now, register it as a pseudo-struct so it passes VarAccess checks
+            StructInfo info;
+            info.name = effectNode->name;
+            struct_table[effectNode->name] = info;
+            
+            // Also register its methods as functions so method calls work
+            for (auto& m : effectNode->methods) {
+                if (auto r = dynamic_cast<RoutineNode*>(m.get())) {
+                    FunctionSignature sig;
+                    sig.returnType = parseDataType(r->returnType);
+                    for (auto& p : r->params) {
+                        sig.paramTypes.push_back(parseDataType(p.type));
+                    }
+                    function_table[r->name] = sig;
+                }
+            }
         } else if (auto nsNode = dynamic_cast<NamespaceNode*>(decl)) {
             current_namespace.push_back(nsNode->name);
             checkDeclarations(nsNode->declarations);
@@ -764,6 +814,7 @@ void SemanticAnalyzer::checkDeclarations(const std::vector<std::unique_ptr<ASTNo
     for (size_t i = 0; i < declarations.size(); ++i) {
         auto* decl = declarations[i].get();
         if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
+              if (!routine->type_params.empty()) continue;
             checkRoutine(routine);
         } else if (auto nsNode = dynamic_cast<NamespaceNode*>(decl)) {
             current_namespace.push_back(nsNode->name);
@@ -772,6 +823,9 @@ void SemanticAnalyzer::checkDeclarations(const std::vector<std::unique_ptr<ASTNo
             // That's what this is doing.
             checkDeclarationsSecondPass(nsNode->declarations);
             current_namespace.pop_back();
+        } else if (auto effectNode = dynamic_cast<EffectDeclNode*>(decl)) {
+            // we could register effect names in a table if needed, for now just no-op or record it
+            // For now, we don't throw an error on EffectDeclNode in the first pass
         }
     }
 }
@@ -780,11 +834,14 @@ void SemanticAnalyzer::checkDeclarationsSecondPass(const std::vector<std::unique
     for (size_t i = 0; i < declarations.size(); ++i) {
         auto* decl = declarations[i].get();
         if (auto routine = dynamic_cast<RoutineNode*>(decl)) {
+            if (!routine->type_params.empty()) continue;
             checkRoutine(routine);
         } else if (auto nsNode = dynamic_cast<NamespaceNode*>(decl)) {
             current_namespace.push_back(nsNode->name);
             checkDeclarationsSecondPass(nsNode->declarations);
             current_namespace.pop_back();
+        } else if (auto effectNode = dynamic_cast<EffectDeclNode*>(decl)) {
+            // Nothing to check for second pass right now.
         }
     }
 }
@@ -796,4 +853,36 @@ void SemanticAnalyzer::analyze(ProgramNode* ast) {
     if (!is_lsp_mode) std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
 }
 
-void SemanticAnalyzer::instantiateRoutineTemplateIfNeeded(const std::string& name, const std::vector<std::string>& type_args) {}
+void SemanticAnalyzer::instantiateRoutineTemplateIfNeeded(const std::string& name, const std::vector<std::string>& type_args) {
+    std::string mangledName = name;
+    for (const auto& ta : type_args) mangledName += "_" + resolveName(ta);
+    if (function_table.find(mangledName) != function_table.end()) return;
+    
+    if (routine_templates.find(name) == routine_templates.end()) return;
+    
+    RoutineNode* r = routine_templates[name];
+    if (r->type_params.size() != type_args.size()) return;
+    
+    std::map<std::string, std::string> type_map;
+    for (size_t i = 0; i < type_args.size(); ++i) {
+        type_map[r->type_params[i]] = resolveName(type_args[i]);
+    }
+    
+    auto cloned = r->clone(type_map);
+    RoutineNode* instantiated = dynamic_cast<RoutineNode*>(cloned.get());
+    if (instantiated) {
+        instantiated->name = mangledName;
+        instantiated->type_params.clear();
+        
+        FunctionSignature sig;
+        sig.returnType = parseDataType(instantiated->returnType);
+        for (auto& p : instantiated->params) {
+            DataType t = parseDataType(p.type);
+            sig.paramTypes.push_back(t);
+        }
+        sig.isVariadic = false;
+        function_table[mangledName] = sig;
+        
+        current_ast->declarations.push_back(std::move(cloned));
+    }
+}

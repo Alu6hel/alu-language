@@ -1,0 +1,42 @@
+import "std/thread.alu";
+import "std/sync.alu";
+import "std/io.alu";
+
+routine reader_thread() {
+    int rw = 1;  // rwlock ID from main
+    sync_rwlock_read_lock(rw);
+    print("  Reader acquired read lock.\n");
+    sleep_ms(50);
+    print("  Reader releasing read lock.\n");
+    sync_rwlock_read_unlock(rw);
+}
+
+routine writer_thread() {
+    int rw = 1;  // rwlock ID from main
+    sleep_ms(20);
+    sync_rwlock_write_lock(rw);
+    print("  Writer acquired write lock.\n");
+    sleep_ms(50);
+    print("  Writer releasing write lock.\n");
+    sync_rwlock_write_unlock(rw);
+}
+
+routine main() -> int {
+    print("=== Read-Write Lock Test ===\n");
+
+    int rw = sync_rwlock_new();
+    printf("Created rwlock with ID: %d\n", rw);
+
+    // Spawn two readers and one writer
+    int r1 = thread_spawn(&reader_thread);
+    int r2 = thread_spawn(&reader_thread);
+    int w1 = thread_spawn(&writer_thread);
+
+    thread_join(r1);
+    thread_join(r2);
+    thread_join(w1);
+
+    sync_rwlock_destroy(rw);
+    print("=== RWLock test finished ===\n");
+    return 0;
+}

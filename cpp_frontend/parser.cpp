@@ -279,7 +279,7 @@ std::unique_ptr<ASTNode> Parser::parseVarDecl() {
     
     // pointers/arrays are handled in parseTypeString
     
-    if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+    if (currentToken().type != TokenType::TOK_IDENTIFIER && currentToken().type != TokenType::TOK_STRING_TYPE && currentToken().type != TokenType::TOK_INT_TYPE && currentToken().type != TokenType::TOK_FLOAT_TYPE) {
         throw std::runtime_error(ErrorReporter::formatError("Expected variable name", filename, currentToken().line, currentToken().col));
     }
     std::string name = currentToken().value;
@@ -594,6 +594,8 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
         return parseFreeStatement();
     } else if (currentToken().type == TokenType::TOK_HANDLE) {
         return parseHandleStatement();
+    } else if (currentToken().type == TokenType::TOK_YIELD) {
+        return parseYieldStatement();
     } else if (currentToken().type == TokenType::TOK_RESUME) {
         return parseResumeStatement();
     } else if (currentToken().type == TokenType::TOK_STAR) {
@@ -762,7 +764,7 @@ std::unique_ptr<RoutineNode> Parser::parseRoutine(bool isExported) {
         receiver = Receiver{rName, rType, isPtr};
     }
     
-    if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+    if (currentToken().type != TokenType::TOK_IDENTIFIER && currentToken().type != TokenType::TOK_STRING_TYPE && currentToken().type != TokenType::TOK_INT_TYPE && currentToken().type != TokenType::TOK_FLOAT_TYPE) {
         throw std::runtime_error(ErrorReporter::formatError("Expected routine name", filename, currentToken().line, currentToken().col));
     }
     std::string name = currentToken().value;
@@ -900,7 +902,7 @@ std::unique_ptr<ImportNode> Parser::parseImport() {
         std::string alias = "";
         if (currentToken().type == TokenType::TOK_AS) {
             advance(); // consume 'as'
-            if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+            if (currentToken().type != TokenType::TOK_IDENTIFIER && currentToken().type != TokenType::TOK_STRING_TYPE && currentToken().type != TokenType::TOK_INT_TYPE && currentToken().type != TokenType::TOK_FLOAT_TYPE) {
                 throw std::runtime_error(ErrorReporter::formatError("Expected identifier after 'as' in import", filename, currentToken().line, currentToken().col));
             }
             alias = currentToken().value;
@@ -913,7 +915,7 @@ std::unique_ptr<ImportNode> Parser::parseImport() {
     
     // New module-path syntax: import std::fs;
     // Parse qualified name: ident (:: ident)*
-    if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+    if (currentToken().type != TokenType::TOK_IDENTIFIER && currentToken().type != TokenType::TOK_STRING_TYPE && currentToken().type != TokenType::TOK_INT_TYPE && currentToken().type != TokenType::TOK_FLOAT_TYPE) {
         throw std::runtime_error(ErrorReporter::formatError("Expected module path or string literal after 'import'", filename, currentToken().line, currentToken().col));
     }
     
@@ -922,7 +924,7 @@ std::unique_ptr<ImportNode> Parser::parseImport() {
     
     while (currentToken().type == TokenType::TOK_DOUBLE_COLON) {
         advance(); // consume ::
-        if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+        if (currentToken().type != TokenType::TOK_IDENTIFIER && currentToken().type != TokenType::TOK_STRING_TYPE && currentToken().type != TokenType::TOK_INT_TYPE && currentToken().type != TokenType::TOK_FLOAT_TYPE) {
             throw std::runtime_error(ErrorReporter::formatError("Expected identifier after '::' in import path", filename, currentToken().line, currentToken().col));
         }
         modulePath += "::" + currentToken().value;
@@ -932,7 +934,7 @@ std::unique_ptr<ImportNode> Parser::parseImport() {
     std::string alias = "";
     if (currentToken().type == TokenType::TOK_AS) {
         advance(); // consume 'as'
-        if (currentToken().type != TokenType::TOK_IDENTIFIER) {
+        if (currentToken().type != TokenType::TOK_IDENTIFIER && currentToken().type != TokenType::TOK_STRING_TYPE && currentToken().type != TokenType::TOK_INT_TYPE && currentToken().type != TokenType::TOK_FLOAT_TYPE) {
             throw std::runtime_error(ErrorReporter::formatError("Expected identifier after 'as' in import", filename, currentToken().line, currentToken().col));
         }
         alias = currentToken().value;

@@ -1,0 +1,50 @@
+import "std/thread.alu";
+import "std/io.alu";
+
+routine my_thread() {
+    print("Inside thread!\n");
+}
+
+routine detach_thread() {
+    print("Detached thread running.\n");
+    sleep_ms(100);
+    print("Detached thread done.\n");
+}
+
+routine main() -> int {
+    print("=== Thread Primitives Test ===\n");
+
+    // thread_hardware_concurrency
+    int cores = thread_hardware_concurrency();
+    printf("Hardware concurrency: %d\n", cores);
+
+    // thread_current_id
+    int main_id = thread_current_id();
+    printf("Main thread ID: %d\n", main_id);
+
+    // thread_spawn + thread_join
+    print("Spawning thread...\n");
+    int t = thread_spawn(&my_thread);
+    thread_join(t);
+    print("Thread joined.\n");
+
+    // thread_detach
+    print("Spawning detached thread...\n");
+    int t2 = thread_spawn(&detach_thread);
+    thread_detach(t2);
+    // Give the detached thread time to finish
+    sleep_ms(300);
+
+    // thread_yield
+    print("Yielding...\n");
+    thread_yield();
+    print("Resumed after yield.\n");
+
+    // sleep_ms
+    print("Sleeping 100ms...\n");
+    sleep_ms(100);
+    print("Woke up.\n");
+
+    print("=== All thread tests passed ===\n");
+    return 0;
+}

@@ -1,0 +1,46 @@
+import std::fs;
+
+extern routine printf(string fmt, ...) -> void;
+
+// Extern declarations
+extern routine add_numbers(int a, int b) -> int;
+@ensures(result == a + b)
+
+extern routine multiply_floats(double a, double b) -> double;
+
+struct Point2D {
+    int x;
+    int y;
+}
+
+routine main() -> int {
+    printf("[FFI TEST] Starting Alu FFI Bindgen Verification...\n");
+
+    // Test C function call: add_numbers
+    int sum = add_numbers(15, 27);
+    printf("[FFI TEST] add_numbers(15, 27) = %d\n", sum);
+    
+    if (sum != 42) {
+        printf("[ERROR] Unexpected sum!\n");
+        return 1;
+    }
+
+    // Test C function call: multiply_floats
+    double prod = multiply_floats(3.5, 2.0);
+    printf("[FFI TEST] multiply_floats(3.5, 2.0) = %f\n", prod);
+
+    // Test struct allocation & field access
+    Point2D p = new Point2D;
+    p.x = 100;
+    p.y = 200;
+    int p_sum = p.x + p.y;
+    printf("[FFI TEST] Point2D {100, 200} sum = %d\n", p_sum);
+
+    if (p_sum != 300) {
+        printf("[ERROR] Unexpected point sum!\n");
+        return 1;
+    }
+
+    printf("[SUCCESS] All FFI generated bindings executed successfully!\n");
+    return 0;
+}
