@@ -2,20 +2,20 @@
 // LLVM IR Emitter written in Pure ALU
 
 struct Emitter {
-    buffer: ptr<u8>
-    capacity: u64
-    size: u64
+    ptr<byte> buffer;
+    int capacity;
+    int size;
 }
 
-routine emit_llvm_ir(ast_root: ptr<ASTNode>) -> ptr<u8> {
-    @requires(ast_root != null)
+@requires("ast_root != null")
+routine emit_llvm_ir(ptr<ASTNode> ast_root, string target_arch, string target_os) -> ptr<byte> {
     
     // Core LLVM generation. In a real self-hosted compiler, this walks the AST and builds the `.ll` string.
-    print("[ALU Emitter] Walking AST and generating LLVM IR natively...")
+    print("[ALU Emitter] Walking AST and generating LLVM IR natively...");
+    ptr<byte> buffer = alloc(10240); // 10KB ptr<byte> buffer for `.ll` output
     
-    // Simulate generation
-    let llvm_string = alloc(1024)
+    ptr<byte> llvm_string = alloc(1024);
     // Write out module header, target triple, and declare blocks
     
-    return llvm_string
+    return llvm_string;
 }

@@ -1,0 +1,8 @@
+struct Node {
+    int value;
+}
+
+routine main() -> void {
+    ptr<Node> p = new Node;
+    ptr<Node> q = p + 1;
+}

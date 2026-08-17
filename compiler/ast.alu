@@ -1,19 +1,26 @@
 // ALU Self-Hosted AST (Abstract Syntax Tree)
 // Parses token streams into a structured memory tree
 
+struct ASTNode {
+    int node_type;
+    string value;
+    ptr<ASTNode> left;
+    ptr<ASTNode> right;
+}
+
 @requires("token_stream != null")
 @requires("token_count > 0")
-routine parse_tokens(token_stream, token_count) {
-    let ast_root = alloc(10240); // 10KB AST allocation
-    let current_token = 0;
+routine parse_tokens(ptr<byte> token_stream, int token_count) -> ptr<ASTNode> {
+    ptr<ASTNode> ast_root = alloc(10240); // 10KB AST allocation
+    int current_token = 0;
     
     // Very basic parsing mock for self-hosting proof
     while (current_token < token_count) {
-        let type = read_token_type(token_stream, current_token);
+        string type = read_token_type(token_stream, current_token);
         
-        if (type == "KEYWORD_ROUTINE") {
-            // Allocate an ASTNode::Routine
-            let routine_node = alloc(128);
+        if (str_eq(type, "KEYWORD_ROUTINE") == 1) {
+            // Allocate memory for Routine AST Node
+            ptr<ASTNode> routine_node = alloc(128);
             attach_node(ast_root, routine_node);
         }
         
@@ -27,34 +34,37 @@ routine parse_tokens(token_stream, token_count) {
 // 1 = Routine, 2 = Condition, 3 = Loop
 // 4 = Alloc, 5 = VariableDecl, 6 = Spawn, 7 = Lock
 
-routine read_token_type(stream, idx) {
+routine read_token_type(ptr<byte> stream, int idx) -> string {
     // Array read mock
     return "KEYWORD_ROUTINE";
 }
 
-routine create_ast_node(node_type) {
-    let node = alloc(128);
+routine create_ast_node(int node_type) -> ptr<ASTNode> {
+    ptr<ASTNode> node = alloc(128);
     // write node_type to node memory
     return node;
 }
 
-routine parse_statement(token_stream, idx) {
-    let type = read_token_type(token_stream, idx);
+extern routine str_eq(string a, string b) -> int;
+
+routine parse_statement(ptr<byte> token_stream, int idx) -> ptr<ASTNode> {
+    string type = read_token_type(token_stream, idx);
     
-    if (type == "KEYWORD_SPAWN") {
+    if (str_eq(type, "KEYWORD_SPAWN") == 1) {
         return create_ast_node(6); // Spawn
     }
-    if (type == "KEYWORD_LOCK") {
+    if (str_eq(type, "KEYWORD_LOCK") == 1) {
         return create_ast_node(7); // Lock
     }
-    if (type == "KEYWORD_LOOP") {
+    if (str_eq(type, "KEYWORD_LOOP") == 1) {
         return create_ast_node(3); // Loop
     }
     
-    return 0;
+    ptr<ASTNode> null_node = alloc(0);
+    return null_node;
 }
 
-routine attach_node(parent, child) {
+routine attach_node(ptr<ASTNode> parent, ptr<ASTNode> child) -> int {
     // Pointer attachment mock
     return 0;
 }

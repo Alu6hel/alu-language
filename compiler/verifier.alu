@@ -1,34 +1,34 @@
 // V22 ALU Self-Hosting Compiler
 // Z3 Symbolic Execution Bounds Checker
 
-routine initialize_z3() {
+routine initialize_z3() -> int {
     // Links natively against z3.dll or libz3.so
-    print("[ALU Verifier] Initializing Pure ALU Z3 Linkage...")
-    return 1
+    print("[ALU Verifier] Initializing Pure ALU Z3 Linkage...");
+    return 1;
 }
 
-routine evaluate_sat_constraint_z3(ast_node: ptr<ASTNode>) {
-    @requires(ast_node != null)
+@requires("ast_node != null")
+routine evaluate_sat_constraint_z3(ptr<ASTNode> ast_node) -> int {
     
     // Parses ASTNode properties, translates them into Z3 constraints, and runs the solver
     // Exits the compiler process instantly if Z3 cannot prove math bound safety.
     
-    return true
+    return 1;
 }
 
-routine verify_ast(ast_root: ptr<ASTNode>) {
-    @requires(ast_root != null)
-    initialize_z3()
+@requires("ast_root != null")
+routine verify_ast(ptr<ASTNode> ast_root) -> int {
+    initialize_z3();
     
-    print("[ALU Verifier] Z3 Prover checking AST invariants...")
+    print("[ALU Verifier] Z3 Prover checking AST invariants...");
     // Simulate walking AST
-    let is_safe = evaluate_sat_constraint_z3(ast_root)
+    int is_safe = evaluate_sat_constraint_z3(ast_root);
     
-    if (is_safe) {
-        print("[ALU Verifier] Q.E.D. All memory states mathematically safe.")
-        return true
+    if (is_safe == 1) {
+        print("[ALU Verifier] Q.E.D. All memory states mathematically safe.");
+        return 1;
     } else {
-        print("[ALU Verifier] Math bounds failed. Halting compilation.")
-        return false
+        print("[ALU Verifier] Math bounds failed. Halting compilation.");
+        return 0;
     }
 }

@@ -1,50 +1,62 @@
 // V22 ALU Self-Hosting Compiler
 // Central Pipeline (The Independence Day)
 
-import compiler::lexer
-import compiler::ast
-import compiler::verifier
-import compiler::emitter
+import compiler::lexer;
+import compiler::ast;
+import compiler::semantic_analyzer;
+import compiler::verifier;
+import compiler::emitter;
+
+extern routine alloc(int bytes) -> ptr<byte>;
+extern routine print(string msg);
+extern routine print_str_3(string m1, string m2, string m3);
+extern routine size(ptr<string> args) -> int;
 
 @requires("size(args) > 1")
 @ensures("source_code != null")
-routine main(args: ptr<ptr<u8>>) -> i32 {
-    print("[ALU Factory] Initializing Pure ALU Compiler 1.0...")
+routine main(ptr<string> args) -> int {
+    print("[ALU Factory] Initializing Pure ALU Compiler 1.0...");
     
     // Z3 Proves this 2MB allocation fits inside system limits without overflow
-    let source_code = alloc(2048)
+    ptr<byte> source_code = alloc(2048);
     // read_file(args[1], source_code)
     
     // 1. Lex
-    print("[ALU Lexer] Scanning tokens...")
-    let tokens = tokenize(source_code)
+    print("[ALU Lexer] Scanning tokens...");
+    ptr<byte> tokens = tokenize_source(source_code, 2048);
     
     // 2. Parse
-    print("[ALU Parser] Constructing AST...")
-    let ast_root = parse_ast(tokens)
+    print("[ALU Parser] Constructing AST...");
+    ptr<ASTNode> ast_root = parse_tokens(tokens, 100);
     
-    // 3. Verify
-    let is_safe = verify_ast(ast_root)
-    if (!is_safe) {
-        return 1
+    // 3. Semantic Analysis
+    int semantics_safe = analyze_semantics(ast_root);
+    if (semantics_safe == 0) {
+        return 1;
     }
     
-    // 4. Check Target Architecture
-    let target_os = "windows"
-    let target_arch = "x86_64"
-    let output_type = "exe"
+    // 4. Verify
+    int is_safe = verify_ast(ast_root);
+    if (is_safe == 0) {
+        return 1;
+    }
+    
+    // 5. Check Target Architecture
+    string target_os = "windows";
+    string target_arch = "x86_64";
+    string output_type = "exe";
     
     // (Simulate argument parsing)
     // if (args_contains("--target aarch64-linux-android")) {
-        target_os = "android"
-        target_arch = "aarch64"
-        output_type = "so"
-        print("[ALU Target] Cross-compiling for Android (ARM64). Outputting Shared Object (.so)...")
+        target_os = "android";
+        target_arch = "aarch64";
+        output_type = "so";
+        print("[ALU Target] Cross-compiling for Android (ARM64). Outputting Shared Object (.so)...");
     // }
     
-    // 5. Emit
-    let llvm_ir = emit_llvm_ir(ast_root, target_arch, target_os)
-    print("[ALU Emitter] LLVM IR generation complete for ", target_arch, "-", target_os)
+    // 6. Emit
+    ptr<byte> llvm_ir = emit_llvm_ir(ast_root, target_arch, target_os);
+    print_str_3("[ALU Emitter] LLVM IR generation complete for ", target_arch, target_os);
     
-    return 0
+    return 0;
 }

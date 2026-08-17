@@ -8,6 +8,20 @@
 LLVMCodeGen::LLVMCodeGen(const std::string& target) : tmp_counter(1), target_arch(target) {
 }
 
+static std::string stripWrapper(const std::string& type) {
+    if (type.find("ptr<") == 0 || type.find("managed<") == 0 || type.find("array<") == 0) {
+        size_t pos1 = type.find("<");
+        size_t pos2 = type.rfind(">");
+        if (pos1 != std::string::npos && pos2 != std::string::npos && pos2 > pos1) {
+            std::string base = type.substr(pos1 + 1, pos2 - pos1 - 1);
+            while (!base.empty() && base.back() == ' ') base.pop_back();
+            while (!base.empty() && base.front() == ' ') base.erase(0, 1);
+            return stripWrapper(base);
+        }
+    }
+    return type;
+}
+
 std::string LLVMCodeGen::getIR() const {
     std::string di_str = emit_debug_info ? "\n" + di_output.str() : "";
     return ir_output.str() + "\n" + global_strings_output.str() + di_str;
@@ -266,15 +280,7 @@ void LLVMCodeGen::declareAluType(const std::string& name, const std::string& alu
 void LLVMCodeGen::declareStructType(const std::string& name, const std::string& structName) {
     if (!struct_type_stack.empty()) {
         std::string actualName = structName;
-        if (actualName.find("ptr") == 0) {
-            size_t pos1 = actualName.find("<");
-            size_t pos2 = actualName.rfind(">");
-            if (pos1 != std::string::npos && pos2 != std::string::npos && pos2 > pos1) {
-                actualName = actualName.substr(pos1 + 1, pos2 - pos1 - 1);
-                while (!actualName.empty() && actualName.back() == ' ') actualName.pop_back();
-                while (!actualName.empty() && actualName.front() == ' ') actualName.erase(0, 1);
-            }
-        }
+        actualName = stripWrapper(actualName);
         struct_type_stack.back()[name] = getNamespacedName(actualName);
     }
 }
@@ -389,6 +395,7 @@ std::string LLVMCodeGen::getInferredLLVMType(ASTNode* expr) {
     }
     if (auto ma = dynamic_cast<MemberAccessNode*>(expr)) {
         std::string sname = lookupStructType(ma->objectName);
+        sname = stripWrapper(sname);
         if (!sname.empty() && sname.back() == '*') sname.pop_back();
         if (struct_field_types.count(sname + "." + ma->fieldName)) return struct_field_types[sname + "." + ma->fieldName];
     }
@@ -422,6 +429,14 @@ std::string LLVMCodeGen::getInferredLLVMType(ASTNode* expr) {
     }
     if (auto addr = dynamic_cast<AddressOfNode*>(expr)) {
         return getInferredLLVMType(addr->expr.get()) + "*";
+    }
+    if (auto alloc = dynamic_cast<NewAllocationNode*>(expr)) {
+        std::string inner_type = stripWrapper(alloc->typeName);
+        std::string base_type = getLLVMType(inner_type);
+        if (!base_type.empty() && base_type.back() == '*') {
+            base_type.pop_back();
+        }
+        return base_type + "*";
     }
     if (auto deref = dynamic_cast<DereferenceNode*>(expr)) {
         std::string t = getInferredLLVMType(deref->expr.get());
@@ -704,8 +719,8 @@ void LLVMCodeGen::visit(DerefAssignNode* node) {
 
 std::string LLVMCodeGen::visit(NewAllocationNode* node) {
     if (emit_debug_info) current_debug_node = node;
-    std::string llvm_type = getLLVMType(node->typeName);
-    std::string base_type = llvm_type;
+    std::string inner_type = stripWrapper(node->typeName);
+    std::string base_type = getLLVMType(inner_type);
     
     // In Alu, getLLVMType for a struct returns '%StructName*'.
     // We need the size of the struct itself, so we remove the trailing '*'.
@@ -849,14 +864,46 @@ std::string LLVMCodeGen::visit(BinOpNode* node) {
     // Pointer arithmetic
     if (ltype.find("*") != std::string::npos && rtype == "i32" && node->op == "+") {
         std::string elem_type = ltype;
-        elem_type.pop_back();
-        emit("  " + res_reg + " = getelementptr inbounds " + elem_type + ", " + ltype + " " + lval + ", i32 " + rval);
+        while (!elem_type.empty() && elem_type.back() == '*') {
+            elem_type.pop_back();
+        }
+        std::string ptr_type = elem_type + "*";
+        
+        std::string cast_lval = lval;
+        if (ltype != ptr_type) {
+            cast_lval = getTempReg();
+            emit("  " + cast_lval + " = bitcast " + ltype + " " + lval + " to " + ptr_type);
+        }
+        
+        if (ltype != ptr_type) {
+            std::string gep_res = getTempReg();
+            emit("  " + gep_res + " = getelementptr inbounds " + elem_type + ", " + ptr_type + " " + cast_lval + ", i32 " + rval);
+            emit("  " + res_reg + " = bitcast " + ptr_type + " " + gep_res + " to " + ltype);
+        } else {
+            emit("  " + res_reg + " = getelementptr inbounds " + elem_type + ", " + ptr_type + " " + cast_lval + ", i32 " + rval);
+        }
         return res_reg;
     }
     if (rtype.find("*") != std::string::npos && ltype == "i32" && node->op == "+") {
         std::string elem_type = rtype;
-        elem_type.pop_back();
-        emit("  " + res_reg + " = getelementptr inbounds " + elem_type + ", " + rtype + " " + rval + ", i32 " + lval);
+        while (!elem_type.empty() && elem_type.back() == '*') {
+            elem_type.pop_back();
+        }
+        std::string ptr_type = elem_type + "*";
+        
+        std::string cast_rval = rval;
+        if (rtype != ptr_type) {
+            cast_rval = getTempReg();
+            emit("  " + cast_rval + " = bitcast " + rtype + " " + rval + " to " + ptr_type);
+        }
+        
+        if (rtype != ptr_type) {
+            std::string gep_res = getTempReg();
+            emit("  " + gep_res + " = getelementptr inbounds " + elem_type + ", " + ptr_type + " " + cast_rval + ", i32 " + lval);
+            emit("  " + res_reg + " = bitcast " + ptr_type + " " + gep_res + " to " + rtype);
+        } else {
+            emit("  " + res_reg + " = getelementptr inbounds " + elem_type + ", " + ptr_type + " " + cast_rval + ", i32 " + lval);
+        }
         return res_reg;
     }
 
@@ -1622,6 +1669,7 @@ std::string LLVMCodeGen::visit(MemberAccessNode* node) {
     }
 
     std::string structName = lookupStructType(node->objectName);
+    structName = stripWrapper(structName);
     structName = sanitizeLLVMName(structName);
     
     std::string varType = lookupVarType(node->objectName);
@@ -1675,6 +1723,7 @@ void LLVMCodeGen::visit(MemberAssignNode* node) {
     }
 
     std::string structName = lookupStructType(node->objectName);
+    structName = stripWrapper(structName);
     structName = sanitizeLLVMName(structName);
     
     std::string varType = lookupVarType(node->objectName);
@@ -1702,6 +1751,19 @@ void LLVMCodeGen::visit(MemberAssignNode* node) {
         val_reg = cast_reg;
     }
     
+    // ARC: Retain new value and release old value for struct fields
+    if (fieldType.find("*") != std::string::npos && fieldType.find("[") == std::string::npos) {
+        std::string cast_new_reg = getTempReg();
+        emit("  " + cast_new_reg + " = bitcast " + fieldType + " " + val_reg + " to i8*");
+        emit("  call void @alu_retain(i8* " + cast_new_reg + ")");
+
+        std::string old_val_reg = getTempReg();
+        emit("  " + old_val_reg + " = load " + fieldType + ", " + fieldType + "* " + field_ptr + ", align 4");
+        std::string cast_old_reg = getTempReg();
+        emit("  " + cast_old_reg + " = bitcast " + fieldType + " " + old_val_reg + " to i8*");
+        emit("  call void @alu_release(i8* " + cast_old_reg + ")");
+    }
+
     emit("  store " + fieldType + " " + val_reg + ", " + fieldType + "* " + field_ptr + ", align 4");
 }
 

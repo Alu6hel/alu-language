@@ -1,16 +1,16 @@
 // ALU Self-Hosted Lexer
-// Tokenizes string input into a stream of syntax tokens
+// Tokenizes ptr<byte> input into a stream of syntax tokens
 
 @requires("input != null")
 @requires("input_size > 0")
-routine tokenize_source(input, input_size) {
-    let token_stream = alloc(8192);
-    let position = 0;
-    let current_token_count = 0;
+routine tokenize_source(ptr<byte> input, int input_size) -> ptr<byte> {
+    ptr<byte> token_stream = alloc(8192);
+    int position = 0;
+    int current_token_count = 0;
 
     // A mock character iteration loop for string parsing
     while (position < input_size) {
-        let current_char = read_char(input, position);
+        int current_char = read_char(input, position);
         
         if (current_char == 32) {
             // Space, skip
@@ -20,7 +20,7 @@ routine tokenize_source(input, input_size) {
         if (current_char == 114) {
             // 'r', might be "routine"
             // Mocking string equality check
-            let is_routine = check_keyword(input, position, "routine");
+            int is_routine = check_keyword(input, position, "routine");
             if (is_routine == 1) {
                 append_token(token_stream, current_token_count, "KEYWORD_ROUTINE");
                 current_token_count = current_token_count + 1;
@@ -28,15 +28,14 @@ routine tokenize_source(input, input_size) {
             }
         }
         
-        // Advance fallback
         position = position + 1;
     }
     
     return token_stream;
 }
 
-routine advance(state) {
-    let pos = read_pos(state);
+routine advance(ptr<byte> state) -> int {
+    int pos = read_pos(state);
     if (pos < read_size(state)) {
         write_pos(state, pos + 1);
         return 1;
@@ -44,16 +43,16 @@ routine advance(state) {
     return 0;
 }
 
-routine peek(state) {
-    let pos = read_pos(state);
+routine peek(ptr<byte> state) -> int {
+    int pos = read_pos(state);
     if (pos < read_size(state)) {
         return read_char(read_input(state), pos);
     }
     return 0;
 }
 
-routine consume(state, expected_char) {
-    let current_char = peek(state);
+routine consume(ptr<byte> state, int expected_char) -> int {
+    int current_char = peek(state);
     if (current_char == expected_char) {
         advance(state);
         return 1;
@@ -61,22 +60,25 @@ routine consume(state, expected_char) {
     return 0;
 }
 
-routine read_char(str, idx) {
+routine read_char(ptr<byte> str, int idx) -> int {
     // LLVM IR fallback mock for char reading
     return 0;
 }
 
-routine check_keyword(str, idx, keyword) {
+routine check_keyword(ptr<byte> str, int idx, ptr<byte> keyword) -> int {
     // Native string matching mock
     return 1;
 }
 
-routine append_token(stream, idx, token) {
+routine append_token(ptr<byte> stream, int idx, ptr<byte> token) -> int {
     // Array manipulation mock
     return 0;
 }
 
-routine read_pos(state) { return 0; }
-routine write_pos(state, val) { return 0; }
-routine read_size(state) { return 0; }
-routine read_input(state) { return 0; }
+routine read_pos(ptr<byte> state) -> int { return 0; }
+routine write_pos(ptr<byte> state, int val) -> int { return 0; }
+routine read_size(ptr<byte> state) -> int { return 0; }
+routine read_input(ptr<byte> state) -> ptr<byte> { 
+    ptr<byte> null_ptr = alloc(0);
+    return null_ptr; 
+}
