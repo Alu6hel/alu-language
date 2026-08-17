@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
             opt_level = arg;
         } else if (arg == "-g" || arg == "--debug") {
             emit_debug_info = true;
-        } else if (i == 1 && (arg == "install" || arg == "build" || arg == "bindgen")) {
+        } else if (i == 1 && (arg == "install" || arg == "build" || arg == "bindgen" || arg == "pkg" || arg == "init" || arg == "run" || arg == "update" || arg == "list" || arg == "search" || arg == "publish" || arg == "clean")) {
             command = arg;
         } else {
             if (hasExtension(arg, ".o") || hasExtension(arg, ".obj") || hasExtension(arg, ".a") || hasExtension(arg, ".lib") || hasExtension(arg, ".c")) {
@@ -144,28 +144,31 @@ int main(int argc, char* argv[]) {
         return res;
     }
 
-    if (command == "install") {
-        if (inputFiles.empty()) {
-            std::cerr << "Usage: alu_cxx install <user/repo>" << std::endl;
-            return 1;
+    if (command == "pkg" || command == "install" || command == "init" || command == "run" || 
+        command == "update" || command == "list" || command == "search" || 
+        command == "publish" || command == "clean" || 
+        (command == "build" && inputFiles.empty())) {
+        
+        std::string exeDir = ModuleLinker::getDirectory(argv[0]);
+        std::string pmExe = exeDir + "/alupm.exe";
+        if (!fileExists(pmExe)) {
+            pmExe = "alupm"; // fallback to PATH
         }
-        std::string target = inputFiles[0];
-        std::string url = "https://github.com/" + target;
-        std::string repo_name = target;
-        size_t slash_pos = target.find('/');
-        if (slash_pos != std::string::npos) {
-            repo_name = target.substr(slash_pos + 1);
-        }
-        std::string cmd = "git clone " + url + " alu_modules/" + repo_name;
-        std::cout << "[ALU CXX] Installing package: " << target << "..." << std::endl;
-        int res = system(cmd.c_str());
-        if (res == 0) {
-            std::cout << "[ALU CXX] Package installed successfully to alu_modules/" << repo_name << std::endl;
+        
+        std::string cmd = pmExe;
+        int startArg = 1;
+        if (command != "pkg") {
+            cmd += " " + command;
+            startArg = 2; // skip the command since we appended it
         } else {
-            std::cerr << "[ALU CXX] Failed to install package." << std::endl;
-            return 1;
+            startArg = 2; // skip "pkg"
         }
-        return 0;
+        
+        for (int i = startArg; i < argc; ++i) {
+            cmd += " ";
+            cmd += argv[i];
+        }
+        return std::system(cmd.c_str());
     }
 
     if (command == "bindgen") {

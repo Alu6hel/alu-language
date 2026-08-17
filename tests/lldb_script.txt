@@ -1,8 +1,0 @@
-b my_math
-r
-thread step-over
-frame variable
-thread step-over
-frame variable
-bt
-quit

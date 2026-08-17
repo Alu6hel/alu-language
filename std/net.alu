@@ -12,33 +12,43 @@ extern routine net_tcp_connect(string host, int port) -> int;
 extern routine net_close(int s) -> void;
 
 // Safe Alu Wrappers
+@requires port > 0
+@requires port <= 65535
 routine tcp_listen(int port) -> int {
     return net_tcp_listen(port);
 }
 
+@requires server_fd > 0
 routine tcp_accept(int server_fd) -> int {
     return net_tcp_accept(server_fd);
 }
 
 extern routine net_tcp_recv_string(int s, int max_len) -> string;
 
+@requires socket_fd > 0
+@requires max_len > 0
 routine tcp_recv(int socket_fd, int max_len) -> string {
     return net_tcp_recv_string(socket_fd, max_len);
 }
 
+@requires socket_fd > 0
 routine tcp_send(int socket_fd, string data, int len) -> int {
     return net_tcp_send(socket_fd, data, len);
 }
 
+@requires port > 0
+@requires port <= 65535
 routine tcp_connect(string host, int port) -> int {
     return net_tcp_connect(host, port);
 }
 
+@requires socket_fd > 0
 routine tcp_close(int socket_fd) -> void {
     net_close(socket_fd);
 }
 
 // Basic HTTP server response utility
+@requires socket_fd > 0
 routine http_send_response(int socket_fd, string content) -> int {
     string header1 = "HTTP/1.1 200 OK\r\n";
     string header2 = "Content-Type: text/plain\r\n";

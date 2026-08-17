@@ -1,3 +1,0 @@
-process launch --stop-at-entry
-bt
-quit

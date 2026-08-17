@@ -8,9 +8,13 @@ import * as path from 'path';
 let client: LanguageClient;
 
 export function activate(context: vscode.ExtensionContext) {
+    const serverPath = process.platform === 'win32' 
+        ? path.join(__dirname, "../../../cpp_frontend/alu-lsp.exe")
+        : path.join(__dirname, "../../../cpp_frontend/alu-lsp");
+    
     const serverOptions: ServerOptions = {
-        run: { command: "C:\\\\Users\\\\Alu\\\\source\\\\repos\\\\Alu6hel\\\\alu-language\\\\cpp_frontend\\\\alu-lsp.exe" },
-        debug: { command: "C:\\\\Users\\\\Alu\\\\source\\\\repos\\\\Alu6hel\\\\alu-language\\\\cpp_frontend\\\\alu-lsp.exe" }
+        run: { command: serverPath },
+        debug: { command: serverPath }
     };
 
     const clientOptions: LanguageClientOptions = {

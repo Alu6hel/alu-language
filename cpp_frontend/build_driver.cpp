@@ -20,12 +20,12 @@ std::string BuildDriver::findCompiler() const {
 
     // Try relative to project dir first
     std::string candidates[] = {
+        (fs::path(projectDir) / "alu.exe").string(),
+        (fs::path(projectDir) / "alu").string(),
         (fs::path(projectDir) / "alu_cxx.exe").string(),
         (fs::path(projectDir) / "alu_cxx").string(),
-        (fs::path(projectDir) / ".." / "alu_cxx.exe").string(),
-        (fs::path(projectDir) / ".." / "alu_cxx").string(),
-        (fs::path(projectDir) / "cpp_frontend" / "alu_cxx.exe").string(),
-        (fs::path(projectDir) / "cpp_frontend" / "alu.exe").string(),
+        (fs::path(projectDir) / ".." / "alu.exe").string(),
+        (fs::path(projectDir) / ".." / "alu").string(),
     };
 
     for (const auto& c : candidates) {
@@ -35,11 +35,11 @@ std::string BuildDriver::findCompiler() const {
     // Fall back to PATH
 #ifdef _WIN32
     // Check if alu_cxx.exe is on PATH by trying 'where'
-    if (std::system("where alu_cxx.exe >NUL 2>NUL") == 0) return "alu_cxx.exe";
     if (std::system("where alu.exe >NUL 2>NUL") == 0) return "alu.exe";
+    if (std::system("where alu_cxx.exe >NUL 2>NUL") == 0) return "alu_cxx.exe";
 #else
-    if (std::system("which alu_cxx >/dev/null 2>&1") == 0) return "alu_cxx";
     if (std::system("which alu >/dev/null 2>&1") == 0) return "alu";
+    if (std::system("which alu_cxx >/dev/null 2>&1") == 0) return "alu_cxx";
 #endif
 
     // Last resort
@@ -66,7 +66,7 @@ std::string BuildDriver::buildCompilerCommand(const ProjectManifest& manifest,
                                               const std::string& compilerPath,
                                               const std::string& targetTriple,
                                               bool debug) const {
-    std::string cmd = "\"" + compilerPath + "\"";
+    std::string cmd = compilerPath;
 
     // Add build command
     cmd += " build";
@@ -76,8 +76,7 @@ std::string BuildDriver::buildCompilerCommand(const ProjectManifest& manifest,
     if (entryFile.empty()) entryFile = "src/main.alu";
     cmd += " \"" + (fs::path(projectDir) / entryFile).string() + "\"";
 
-    // Set std path (modules directory may contain std libs)
-    cmd += " --std-path \"" + projectDir + "\"";
+    // Let compiler resolve standard library automatically using its default std-path
 
     // Target triple
     if (!targetTriple.empty()) {
@@ -141,11 +140,11 @@ int BuildDriver::build(const std::string& targetTriple, bool debug) {
     if (result == 0) {
         // Compute output path
         std::string entryFile = manifest.entry.empty() ? "src/main.alu" : manifest.entry;
-        std::string baseName = fs::path(entryFile).stem().string();
+        // The compiler generates the output adjacent to the source file
 #ifdef _WIN32
-        outputPath = (fs::path(projectDir) / (baseName + ".exe")).string();
+        outputPath = (fs::path(projectDir) / entryFile).replace_extension(".exe").string();
 #else
-        outputPath = (fs::path(projectDir) / baseName).string();
+        outputPath = (fs::path(projectDir) / entryFile).replace_extension("").string();
 #endif
         std::cout << "[ALUPM] Build successful!" << std::endl;
     } else {
@@ -169,7 +168,7 @@ int BuildDriver::run(const std::vector<std::string>& args, const std::string& ta
     std::cout << "[ALUPM] Running " << outputPath << "..." << std::endl;
     std::cout << "──────────────────────────────────────────────────" << std::endl;
 
-    std::string cmd = "\"" + outputPath + "\"";
+    std::string cmd = outputPath;
     for (const auto& arg : args) {
         cmd += " \"" + arg + "\"";
     }

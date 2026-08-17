@@ -38,11 +38,15 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const aluDebug_1 = require("./aluDebug");
 const node_1 = require("vscode-languageclient/node");
+const path = __importStar(require("path"));
 let client;
 function activate(context) {
+    const serverPath = process.platform === 'win32'
+        ? path.join(__dirname, "../../../cpp_frontend/alu-lsp.exe")
+        : path.join(__dirname, "../../../cpp_frontend/alu-lsp");
     const serverOptions = {
-        run: { command: "C:\\\\Users\\\\Alu\\\\source\\\\repos\\\\Alu6hel\\\\alu-language\\\\cpp_frontend\\\\alu-lsp.exe" },
-        debug: { command: "C:\\\\Users\\\\Alu\\\\source\\\\repos\\\\Alu6hel\\\\alu-language\\\\cpp_frontend\\\\alu-lsp.exe" }
+        run: { command: serverPath },
+        debug: { command: serverPath }
     };
     const clientOptions = {
         documentSelector: [{ scheme: 'file', language: 'alu' }]

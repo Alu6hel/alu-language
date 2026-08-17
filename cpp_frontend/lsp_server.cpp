@@ -16,6 +16,26 @@
 #include "parser.h"
 #include "semantic_analyzer.h"
 #include "z3_verifier.h"
+#include "linker.h"
+
+std::string globalStdPath = "../std";
+
+std::string uriToPath(const std::string& uri) {
+    std::string path = uri;
+    const std::string prefix = "file:///";
+    if (path.find(prefix) == 0) {
+        path = path.substr(prefix.length());
+    } else if (path.find("file://") == 0) {
+        path = path.substr(7);
+    }
+    size_t pos = 0;
+    while ((pos = path.find("%3A", pos)) != std::string::npos) {
+        path.replace(pos, 3, ":");
+        pos += 1;
+    }
+    return path;
+}
+
 
 using json = nlohmann::json;
 
@@ -59,6 +79,12 @@ void validateDocument(const std::string& uri, const std::string& content) {
         std::vector<Token> tokens = lexer.tokenize();
         Parser parser(tokens, uri);
         state.ast = parser.parse();
+        
+        std::string localPath = uriToPath(uri);
+        std::string currentDir = ModuleLinker::getDirectory(localPath);
+        
+        ModuleLinker linker(globalStdPath);
+        linker.link(state.ast.get(), currentDir, localPath);
         
         state.analyzer = std::make_shared<SemanticAnalyzer>();
         state.analyzer->is_lsp_mode = true;
@@ -262,7 +288,10 @@ void handleMessage(const json& msg) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 0) {
+        globalStdPath = ModuleLinker::getDirectory(argv[0]) + "/../std";
+    }
 #ifdef _WIN32
     _setmode(_fileno(stdin), _O_BINARY);
     _setmode(_fileno(stdout), _O_BINARY);

@@ -3,14 +3,17 @@
 
 // Spawn a new thread that executes the given routine.
 // Returns a thread handle (integer ID) used to join or detach the thread.
+@requires fn_ptr != null
 extern routine thread_spawn(ptr<routine> fn_ptr) -> int;
 
 // Block the calling thread until the target thread has finished execution.
 // After joining, the thread handle is invalidated.
+@requires thread_id != 0
 extern routine thread_join(int thread_id) -> void;
 
 // Detach the thread so it runs independently. Its resources are released
 // automatically when it finishes. After detaching, the handle is invalidated.
+@requires thread_id != 0
 extern routine thread_detach(int thread_id) -> void;
 
 // Return a unique integer ID for the calling thread.
@@ -24,4 +27,5 @@ extern routine thread_yield() -> void;
 extern routine thread_hardware_concurrency() -> int;
 
 // Suspend the calling thread for the specified number of milliseconds.
+@requires ms >= 0
 extern routine sleep_ms(int ms) -> void;

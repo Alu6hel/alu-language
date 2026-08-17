@@ -17,46 +17,63 @@ extern routine fs_size_c(string path) -> int;
 extern routine fputs_c(string str, string stream) -> int;
 
 // Wrappers
+@requires filename != null
+@requires mode != null
 routine fs_fopen(string filename, string mode) -> string {
     return fopen_c(filename, mode);
 }
 
+@requires ptr != null
+@requires size >= 0
 routine fs_fread(string ptr, int size, string stream) -> int {
     return fread_c(ptr, 1, size, stream);
 }
 
+@requires ptr != null
+@requires size >= 0
 routine fs_fwrite(string ptr, int size, string stream) -> int {
     return fwrite_c(ptr, 1, size, stream);
 }
 
+@requires stream != null
 routine fs_fclose(string stream) -> int {
     return fclose_c(stream);
 }
 
+@requires path != null
 routine fs_read_file(string path) -> string {
     return fs_read_to_string_c(path);
 }
 
+@requires path != null
+@requires content != null
 routine fs_write_file(string path, string content) -> int {
     return fs_write_string_c(path, content);
 }
 
+@requires path != null
+@requires content != null
 routine fs_append_file(string path, string content) -> int {
     return fs_append_string_c(path, content);
 }
 
+@requires path != null
 routine fs_exists(string path) -> int {
     return fs_exists_c(path);
 }
 
+@requires path != null
 routine fs_size(string path) -> int {
     return fs_size_c(path);
 }
 
+@requires path != null
 routine fs_remove(string path) -> int {
     return remove_c(path);
 }
 
+@requires str != null
+@requires stream != null
 routine fs_fputs(string str, string stream) -> int {
     return fputs_c(str, stream);
 }

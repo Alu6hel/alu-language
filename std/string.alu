@@ -3,6 +3,7 @@
 import std::collections;
 
 
+@ensures return >= 0
 extern routine strlen(string s) -> int;
 extern routine strcpy(string dest, string src) -> string;
 extern routine strncpy(string dest, string src, int n) -> string;
