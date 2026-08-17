@@ -2,6 +2,9 @@
 #include "error_reporter.h"
 #include <iostream>
 #include <stdexcept>
+#include <future>
+#include <atomic>
+#include <mutex>
 
 static z3::expr ensure_bool(const z3::expr& e, z3::context& ctx) {
     if (e.is_bool()) return e;
@@ -628,13 +631,108 @@ void Z3Verifier::checkRoutine(RoutineNode* node) {
     popScope();
 }
 
-// --- Program Checking ---
+// --- Program Checking and Pruning ---
+
+bool Z3Verifier::hasMemoryRisks(ASTNode* node) {
+    if (!node) return false;
+    
+    // Nodes that explicitly require Z3 tracking
+    if (dynamic_cast<ArrayIndexNode*>(node) ||
+        dynamic_cast<ArrayAssignNode*>(node) ||
+        dynamic_cast<NewAllocationNode*>(node) ||
+        dynamic_cast<FreeNode*>(node) ||
+        dynamic_cast<DereferenceNode*>(node) ||
+        dynamic_cast<DerefAssignNode*>(node) ||
+        dynamic_cast<AssertNode*>(node)) {
+        return true;
+    }
+
+    // Check variables typed as pointers
+    if (auto varDecl = dynamic_cast<VarDeclNode*>(node)) {
+        if (!varDecl->varType.empty() && varDecl->varType.back() == '*') return true;
+        if (varDecl->initializer && hasMemoryRisks(varDecl->initializer.get())) return true;
+        return false;
+    }
+
+    // Check routines with contracts
+    if (auto routine = dynamic_cast<RoutineNode*>(node)) {
+        if (!routine->requires_annotations.empty() || !routine->ensures_annotations.empty()) return true;
+        for (const auto& stmt : routine->body) {
+            if (hasMemoryRisks(stmt.get())) return true;
+        }
+        return false;
+    }
+
+    // Recursively check children based on node type
+    if (auto ifNode = dynamic_cast<IfNode*>(node)) {
+        if (hasMemoryRisks(ifNode->condition.get())) return true;
+        for (const auto& s : ifNode->then_body) if (hasMemoryRisks(s.get())) return true;
+        for (const auto& s : ifNode->else_body) if (hasMemoryRisks(s.get())) return true;
+        return false;
+    } else if (auto whileNode = dynamic_cast<WhileNode*>(node)) {
+        if (hasMemoryRisks(whileNode->condition.get())) return true;
+        for (const auto& s : whileNode->body) if (hasMemoryRisks(s.get())) return true;
+        return false;
+    } else if (auto forNode = dynamic_cast<ForNode*>(node)) {
+        if (forNode->init && hasMemoryRisks(forNode->init.get())) return true;
+        if (forNode->condition && hasMemoryRisks(forNode->condition.get())) return true;
+        if (forNode->update && hasMemoryRisks(forNode->update.get())) return true;
+        for (const auto& s : forNode->body) if (hasMemoryRisks(s.get())) return true;
+        return false;
+    } else if (auto binop = dynamic_cast<BinOpNode*>(node)) {
+        if (binop->op == "/") return true; // Division by zero check needed
+        return hasMemoryRisks(binop->left.get()) || hasMemoryRisks(binop->right.get());
+    } else if (auto funcCall = dynamic_cast<FuncCallNode*>(node)) {
+        return true; // We need to evaluate @requires constraints of the called function
+    } else if (auto methodCall = dynamic_cast<MethodCallNode*>(node)) {
+        return true; 
+    } else if (auto retNode = dynamic_cast<ReturnNode*>(node)) {
+        if (retNode->expr) return hasMemoryRisks(retNode->expr.get());
+        return false;
+    } else if (auto varAssign = dynamic_cast<VarAssignNode*>(node)) {
+        return hasMemoryRisks(varAssign->expr.get());
+    } else if (auto memberAssign = dynamic_cast<MemberAssignNode*>(node)) {
+        return hasMemoryRisks(memberAssign->expr.get());
+    } else if (auto arrDecl = dynamic_cast<ArrayDeclNode*>(node)) {
+        return true;
+    }
+
+    return false;
+}
 
 void Z3Verifier::checkProgram(ProgramNode* node) {
+    std::vector<std::future<void>> futures;
+    std::atomic<int> skipped_count{0};
+    std::mutex cerr_mutex;
+
     for (const auto& decl : node->declarations) {
         if (auto routine = dynamic_cast<RoutineNode*>(decl.get())) {
-            checkRoutine(routine);
+            if (!hasMemoryRisks(routine)) {
+                skipped_count++;
+                continue;
+            }
+
+            futures.push_back(std::async(std::launch::async, [this, routine, &cerr_mutex]() {
+                try {
+                    Z3Verifier worker;
+                    worker.setContracts(this->routine_contracts);
+                    worker.checkRoutinePublic(routine);
+                } catch (...) {
+                    std::lock_guard<std::mutex> lock(cerr_mutex);
+                    // Let the exception propagate to be caught by future.get()
+                    throw;
+                }
+            }));
         }
+    }
+
+    // Wait for all routines to complete and propagate any thrown exceptions
+    for (auto& f : futures) {
+        f.get();
+    }
+
+    if (skipped_count > 0) {
+        std::cerr << "[ALU CXX] Z3 Pruning: Skipped " << skipped_count << " routine(s) with no memory risks." << std::endl;
     }
 }
 

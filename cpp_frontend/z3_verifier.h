@@ -76,4 +76,13 @@ private:
 public:
     Z3Verifier();
     void verify(ProgramNode* ast);
+    
+    // For multithreaded parallel verification
+    void setContracts(const std::unordered_map<std::string, RoutineContract>& contracts) {
+        this->routine_contracts = contracts;
+    }
+    void checkRoutinePublic(RoutineNode* node) { checkRoutine(node); }
+    
+    // Pruning strategy
+    static bool hasMemoryRisks(ASTNode* node);
 };

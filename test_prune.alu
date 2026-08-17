@@ -1,0 +1,10 @@
+routine trivial_math(int a, int b) -> int {
+    int x = a + b;
+    int y = x * 2;
+    return y;
+}
+
+routine main() -> int {
+    int result = trivial_math(5, 10);
+    return result;
+}
