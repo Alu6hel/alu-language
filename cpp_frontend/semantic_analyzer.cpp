@@ -1090,12 +1090,12 @@ void SemanticAnalyzer::analyzeOwnership() {
         const std::string& structName = kv.first;
         for (const auto& field : kv.second.fields) {
             std::string type = field.type;
-            if (type.find("managed<") == 0) {
-                size_t p1 = type.find("<");
-                size_t p2 = type.rfind(">");
-                if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
-                    std::string innerType = type.substr(p1 + 1, p2 - p1 - 1);
-                    // clean up whitespace
+            size_t pos = 0;
+            while ((pos = type.find("managed<", pos)) != std::string::npos) {
+                size_t start = pos + 8;
+                size_t end = type.find(">", start);
+                if (end != std::string::npos) {
+                    std::string innerType = type.substr(start, end - start);
                     while (!innerType.empty() && innerType.back() == ' ') innerType.pop_back();
                     while (!innerType.empty() && innerType.front() == ' ') innerType.erase(0, 1);
                     
@@ -1103,6 +1103,7 @@ void SemanticAnalyzer::analyzeOwnership() {
                         adj[structName].push_back(innerType);
                     }
                 }
+                pos += 8;
             }
         }
     }

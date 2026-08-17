@@ -1,0 +1,9 @@
+struct Node {
+    array<managed<Node>> children;
+    int value;
+}
+
+routine main() {
+    managed<Node> a = new Node;
+    a.value = 1;
+}

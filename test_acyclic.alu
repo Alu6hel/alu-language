@@ -1,0 +1,15 @@
+struct Node {
+    int value;
+}
+
+struct Tree {
+    managed<Node> root;
+}
+
+routine main() {
+    managed<Node> root = new Node;
+    root.value = 100;
+    
+    managed<Tree> tree = new Tree;
+    tree.root = root;
+}
