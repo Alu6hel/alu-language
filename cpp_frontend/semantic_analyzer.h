@@ -57,6 +57,7 @@ private:
     std::unordered_map<std::string, StructInfo> struct_table;
     std::unordered_map<std::string, StructDefNode*> struct_templates;
     std::unordered_map<std::string, RoutineNode*> routine_templates;
+    std::unordered_set<std::string> known_acyclic;
     std::vector<std::string> current_namespace;
     
     std::string resolveName(const std::string& name);

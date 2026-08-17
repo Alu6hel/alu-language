@@ -1,0 +1,11 @@
+struct A {
+    managed<B> b;
+}
+
+struct B {
+    managed<A> a;
+}
+
+routine main() -> void {
+    managed<A> x = new A;
+}

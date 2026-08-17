@@ -1060,6 +1060,9 @@ void SemanticAnalyzer::analyze(ProgramNode* ast) {
 }
 
 bool SemanticAnalyzer::detectCycle(const std::string& current, std::unordered_set<std::string>& visited, std::unordered_set<std::string>& recStack, std::vector<std::string>& path, std::unordered_map<std::string, std::vector<std::string>>& adj) {
+    if (known_acyclic.find(current) != known_acyclic.end()) {
+        return false;
+    }
     if (recStack.find(current) != recStack.end()) {
         path.push_back(current);
         return true;
@@ -1080,6 +1083,7 @@ bool SemanticAnalyzer::detectCycle(const std::string& current, std::unordered_se
     
     path.pop_back();
     recStack.erase(current);
+    known_acyclic.insert(current);
     return false;
 }
 
@@ -1111,6 +1115,13 @@ void SemanticAnalyzer::analyzeOwnership() {
     std::unordered_set<std::string> visited;
     std::unordered_set<std::string> recStack;
     std::vector<std::string> path;
+    
+    // Prune leaf structs without outbound managed/ptr edges
+    for (const auto& kv : struct_table) {
+        if (adj.find(kv.first) == adj.end() || adj[kv.first].empty()) {
+            known_acyclic.insert(kv.first);
+        }
+    }
     
     for (const auto& kv : struct_table) {
         if (visited.find(kv.first) == visited.end()) {
