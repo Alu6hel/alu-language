@@ -1,0 +1,56 @@
+name: Alu Performance Benchmarks
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Setup LLVM (Clang)
+      run: |
+        choco install llvm -y
+        # Wait for path update, or use direct clang++ path if needed
+
+    # Build the alu_cxx compiler first so we can use it to benchmark Alu code
+    - name: Build Alu Compiler
+      run: |
+        cd cpp_frontend
+        mkdir build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        cmake --build . --config Release
+        copy Release\alu_cxx.exe ..\..\alu_cxx.exe
+        copy Release\libz3.dll ..\..\libz3.dll
+      shell: cmd
+
+    - name: Run Benchmarks
+      run: |
+        cd benchmarks
+        python benchmark.py > benchmark_results.md
+        cat benchmark_results.md
+      shell: bash
+
+    - name: Publish Results as PR Comment
+      if: github.event_name == 'pull_request'
+      uses: thollander/actions-comment-pull-request@v2
+      with:
+        filePath: benchmarks/benchmark_results.md
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,16 @@
+// Minimal Alu script for WASM testing
+
+export routine calculate_physics() -> int {
+    int position = 0;
+    int velocity = 5;
+    int acceleration = 2;
+    int time = 10;
+    
+    // pos = v * t + 1/2 * a * t^2
+    position = (velocity * time) + (acceleration * time * time) / 2;
+    return position;
+}
+
+export routine add_vectors(int x1, int y1, int x2, int y2) -> int {
+    return (x1 + x2) * 1000 + (y1 + y2);
+}

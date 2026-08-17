@@ -150,55 +150,32 @@ bool Z3Verifier::isStringLiteralAnnotation(ASTNode* expr) {
 // Evaluate an annotation expression, substituting formal parameter names
 // with the corresponding Z3 expressions from actual arguments.
 // Also handles the special variable "return" mapped to __return.
-z3::expr Z3Verifier::evalAnnotationExpr(ASTNode* expr,
-                                         const std::vector<Parameter>& formal_params,
-                                         const std::vector<z3::expr>& actual_exprs) {
-    if (auto literal = dynamic_cast<LiteralNode*>(expr)) {
-        if (literal->type == DataType::INT) {
-            return ctx.int_val(std::stoll(literal->value));
-        } else if (literal->type == DataType::BOOL) {
-            return ctx.bool_val(literal->value == "true");
+z3::expr Z3Verifier::evalAnnotationExpr(ASTNode* expr, const std::vector<Parameter>& formal_params, const std::vector<ASTNode*>& actual_args) {
+    pushScope();
+    for (size_t i = 0; i < formal_params.size() && i < actual_args.size(); ++i) {
+        z3::expr arg_val = evalExpression(actual_args[i]);
+        declareVar(formal_params[i].name, arg_val);
+        if (!formal_params[i].refinement_var.empty()) {
+            declareVar(formal_params[i].refinement_var, arg_val);
         }
-        // Unhandled literal types — return a dummy
-        return ctx.int_const("dummy_annotation");
-    } else if (auto varAccess = dynamic_cast<VarAccessNode*>(expr)) {
-        // Check if this is "return" — the special postcondition variable
-        if (varAccess->name == "return" || varAccess->name == "__return") {
-            return getVar("__return");
-        }
-        // Check if this is "null" — treat as 0
-        if (varAccess->name == "null") {
-            return ctx.int_val(0);
-        }
-        // Check if it matches a formal parameter name — substitute with actual
-        for (size_t i = 0; i < formal_params.size(); ++i) {
-            if (formal_params[i].name == varAccess->name && i < actual_exprs.size()) {
-                return actual_exprs[i];
+        
+        // Map struct fields
+        if (auto varNode = dynamic_cast<VarAccessNode*>(actual_args[i])) {
+            std::string prefix = varNode->name + "_";
+            std::string target_prefix = formal_params[i].name + "_";
+            for (auto it = scope_stack.rbegin(); it != scope_stack.rend(); ++it) {
+                for (const auto& kv : *it) {
+                    if (kv.first.find(prefix) == 0) {
+                        std::string field_name = kv.first.substr(prefix.length());
+                        declareVar(target_prefix + field_name, kv.second);
+                    }
+                }
             }
         }
-        // Fall back to the scope-based lookup
-        return getVar(varAccess->name);
-    } else if (auto binop = dynamic_cast<BinOpNode*>(expr)) {
-        z3::expr left = evalAnnotationExpr(binop->left.get(), formal_params, actual_exprs);
-        z3::expr right = evalAnnotationExpr(binop->right.get(), formal_params, actual_exprs);
-        if (binop->op == "+") return left + right;
-        if (binop->op == "-") return left - right;
-        if (binop->op == "*") return left * right;
-        if (binop->op == "/") {
-            verifyDivisionByZero(right);
-            return left / right;
-        }
-        if (binop->op == "==") return left == right;
-        if (binop->op == "!=") return left != right;
-        if (binop->op == "<") return left < right;
-        if (binop->op == "<=") return left <= right;
-        if (binop->op == ">") return left > right;
-        if (binop->op == ">=") return left >= right;
-        if (binop->op == "&&") return left && right;
-        if (binop->op == "||") return left || right;
     }
-    // Fallback
-    return ctx.bool_val(true);
+    z3::expr result = ensure_bool(evalExpression(expr), ctx);
+    popScope();
+    return result;
 }
 
 // --- Contract Registration Pass ---
@@ -221,6 +198,11 @@ void Z3Verifier::registerContractsInDeclarations(const std::vector<std::unique_p
                 for (const auto& ens : routine->ensures_annotations) {
                     contract.ensures_exprs.push_back(ens.get());
                 }
+                for (const auto& p : routine->params) {
+                    if (p.refinement_expr) {
+                        contract.requires_exprs.push_back(p.refinement_expr.get());
+                    }
+                }
                 routine_contracts[routine->name] = contract;
             }
         } else if (auto ext = dynamic_cast<ExternRoutineNode*>(decl.get())) {
@@ -234,6 +216,11 @@ void Z3Verifier::registerContractsInDeclarations(const std::vector<std::unique_p
                 }
                 for (const auto& ens : ext->ensures_annotations) {
                     contract.ensures_exprs.push_back(ens.get());
+                }
+                for (const auto& p : ext->params) {
+                    if (p.refinement_expr) {
+                        contract.requires_exprs.push_back(p.refinement_expr.get());
+                    }
                 }
                 routine_contracts[ext->name] = contract;
             }
@@ -253,18 +240,14 @@ void Z3Verifier::verifyRequiresAtCallSite(const std::string& calleeName,
     const RoutineContract& contract = it->second;
     if (contract.requires_exprs.empty()) return;
 
-    // Evaluate actual arguments into Z3 expressions
-    std::vector<z3::expr> actual_z3;
-    for (const auto& arg : actual_args) {
-        actual_z3.push_back(evalExpression(arg.get()));
-    }
+    std::vector<ASTNode*> args_ptrs;
+    for (const auto& arg : actual_args) args_ptrs.push_back(arg.get());
 
     // Check each @requires clause
     for (ASTNode* req_expr : contract.requires_exprs) {
-        // Skip string-literal annotations (documentation only)
         if (isStringLiteralAnnotation(req_expr)) continue;
 
-        z3::expr precondition = evalAnnotationExpr(req_expr, contract.params, actual_z3);
+        z3::expr precondition = evalAnnotationExpr(req_expr, contract.params, args_ptrs);
         
         // To verify the precondition holds, check if its negation is satisfiable
         solver.push();
@@ -272,10 +255,10 @@ void Z3Verifier::verifyRequiresAtCallSite(const std::string& calleeName,
         
         if (solver.check() == z3::sat) {
             z3::model m = solver.get_model();
-//             std::cerr << "\n[ALU CXX Z3 FATAL] @requires Contract Violation Detected!" << std::endl;
-//             std::cerr << "  Function: '" << calleeName << "'" << std::endl;
-//             std::cerr << "  Precondition may not hold at this call site." << std::endl;
-//             std::cerr << "  Z3 Counterexample: " << m << std::endl;
+            std::cerr << "\n[ALU CXX Z3 FATAL] @requires Contract Violation Detected!" << std::endl;
+            std::cerr << "  Function: '" << calleeName << "'" << std::endl;
+            std::cerr << "  Precondition may not hold at this call site." << std::endl;
+            std::cerr << "  Z3 Counterexample: " << m << std::endl;
             int l = current_node ? current_node->line : 1;
             int c = current_node ? current_node->col : 1;
             std::string f = current_node ? current_node->file : "";
@@ -294,20 +277,19 @@ void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr
     const RoutineContract& contract = it->second;
     if (contract.ensures_exprs.empty()) return;
 
-    // The formal params are already declared as Z3 variables in the scope.
-    // Build actual_exprs from the scope — use the current Z3 var for each param.
-    std::vector<z3::expr> param_exprs;
+    std::vector<std::unique_ptr<ASTNode>> param_exprs_mem;
+    std::vector<ASTNode*> param_exprs;
     for (const auto& p : contract.params) {
-        param_exprs.push_back(getVar(p.name));
+        param_exprs_mem.push_back(std::make_unique<VarAccessNode>(p.name));
+        param_exprs.push_back(param_exprs_mem.back().get());
     }
 
     // Evaluate the return expression and bind it to __return
     z3::expr ret_val = ctx.int_const("__return");
     if (returnExpr) {
-        z3::expr evaluated_ret = evalExpression(returnExpr);
-        solver.add(ret_val == evaluated_ret);
+        ret_val = evalExpression(returnExpr);
     }
-    declareVar("__return", ret_val);
+    declareVar("return", ret_val);
 
     // Check each @ensures clause
     for (ASTNode* ens_expr : contract.ensures_exprs) {
@@ -367,6 +349,9 @@ z3::expr Z3Verifier::evalExpression(ASTNode* expr) {
             solver.pop();
         }
         return getVar(varAccess->name);
+    } else if (auto memberAccess = dynamic_cast<MemberAccessNode*>(expr)) {
+        std::string full_name = memberAccess->objectName + "_" + memberAccess->fieldName;
+        return getVar(full_name);
     } else if (auto binop = dynamic_cast<BinOpNode*>(expr)) {
         z3::expr left = evalExpression(binop->left.get());
         z3::expr right = evalExpression(binop->right.get());
@@ -427,6 +412,29 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
             z3::expr init_val = evalExpression(vardecl->initializer.get());
             solver.add(var == init_val);
             
+            if (vardecl->refinement_expr) {
+                pushScope();
+                declareVar(vardecl->refinement_var, init_val);
+                z3::expr ref_cond = ensure_bool(evalExpression(vardecl->refinement_expr.get()), ctx);
+                
+                solver.push();
+                solver.add(!ref_cond);
+                if (solver.check() == z3::sat) {
+                    int l = current_node ? current_node->line : 1;
+                    int c = current_node ? current_node->col : 1;
+                    std::string f = current_node ? current_node->file : "";
+                    throw std::runtime_error(ErrorReporter::formatError("Z3 Verification Failed: Refinement constraint not satisfied on assignment", f, l, c));
+                }
+                solver.pop();
+                popScope();
+                
+                pushScope();
+                declareVar(vardecl->refinement_var, var);
+                z3::expr var_cond = ensure_bool(evalExpression(vardecl->refinement_expr.get()), ctx);
+                popScope();
+                solver.add(var_cond);
+            }
+            
             if (auto rhs_var = dynamic_cast<VarAccessNode*>(vardecl->initializer.get())) {
                 bool is_ptr = (!vardecl->varType.empty() && vardecl->varType.back() == '*');
                 if (is_ptr && var_to_id.count(rhs_var->name)) {
@@ -441,6 +449,12 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
                 owned_pointers_stack.back().insert(vardecl->name);
             }
         }
+    } else if (auto memberAssign = dynamic_cast<MemberAssignNode*>(stmt)) {
+        z3::expr new_val = evalExpression(memberAssign->expr.get());
+        std::string full_name = memberAssign->objectName + "_" + memberAssign->fieldName;
+        z3::expr var = ctx.int_const((full_name + "_new").c_str());
+        declareVar(full_name, var);
+        solver.add(var == new_val);
     } else if (auto varassign = dynamic_cast<VarAssignNode*>(stmt)) {
         z3::expr new_val = evalExpression(varassign->expr.get());
         
@@ -591,9 +605,11 @@ void Z3Verifier::checkRoutine(RoutineNode* node) {
         const RoutineContract& contract = cit->second;
         
         // Build param expressions for annotation evaluation
-        std::vector<z3::expr> param_exprs;
+        std::vector<std::unique_ptr<ASTNode>> param_exprs_mem;
+        std::vector<ASTNode*> param_exprs;
         for (const auto& p : contract.params) {
-            param_exprs.push_back(getVar(p.name));
+            param_exprs_mem.push_back(std::make_unique<VarAccessNode>(p.name));
+            param_exprs.push_back(param_exprs_mem.back().get());
         }
 
         for (ASTNode* req_expr : contract.requires_exprs) {

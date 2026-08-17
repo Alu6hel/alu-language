@@ -1,6 +1,7 @@
 #pragma once
 #include "ast.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <vector>
 
@@ -29,10 +30,17 @@ struct LSPSymbol {
 
 struct SymbolMeta {
     DataType type;
+    std::string unit = "";
     int def_line = 0;
     int def_col = 0;
     std::string def_file = "";
 };
+
+struct TypeInfo {
+    DataType type;
+    std::string unit;
+};
+
 
 class SemanticAnalyzer {
 public:
@@ -66,20 +74,23 @@ private:
     bool lookupSymbolMeta(const std::string& name, SymbolMeta& outMeta);
     bool lookupStructVar(const std::string& name, std::string& outStructName);
     bool isDeclaredInCurrentScope(const std::string& name);
-    void declareSymbol(const std::string& name, DataType type, int line = 0, int col = 0, const std::string& file = "");
+    void declareSymbol(const std::string& name, DataType type, const std::string& unit = "", int line = 0, int col = 0, const std::string& file = "");
     void declareStructVar(const std::string& name, const std::string& structName);
     
     void instantiateTemplateIfNeeded(const std::string& typeStr);
     void instantiateRoutineTemplateIfNeeded(const std::string& name, const std::vector<std::string>& type_args);
     
     DataType parseDataType(const std::string& typeStr);
-    DataType checkExpression(ASTNode* expr);
+    TypeInfo checkExpression(ASTNode* expr);
     void checkVarDecl(VarDeclNode* decl);
     void checkStatement(ASTNode* stmt);
     void checkRoutine(RoutineNode* routine);
     void checkProgram(ProgramNode* node);
     void checkDeclarations(const std::vector<std::unique_ptr<ASTNode>>& declarations);
     void checkDeclarationsSecondPass(const std::vector<std::unique_ptr<ASTNode>>& declarations);
+    
+    void analyzeOwnership();
+    bool detectCycle(const std::string& current, std::unordered_set<std::string>& visited, std::unordered_set<std::string>& recStack, std::vector<std::string>& path, std::unordered_map<std::string, std::vector<std::string>>& adj);
     
 public:
     void analyze(ProgramNode* ast);

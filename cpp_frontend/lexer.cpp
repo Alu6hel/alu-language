@@ -81,6 +81,10 @@ std::vector<Token> Lexer::tokenize() {
             else if (ident == "float") tokens.push_back({TokenType::TOK_FLOAT_TYPE, ident, startLine, startCol});
             else if (ident == "double") tokens.push_back({TokenType::TOK_DOUBLE_TYPE, ident, startLine, startCol});
             else if (ident == "byte") tokens.push_back({TokenType::TOK_BYTE_TYPE, ident, startLine, startCol});
+            else if (ident == "float4") tokens.push_back({TokenType::TOK_FLOAT4_TYPE, ident, startLine, startCol});
+            else if (ident == "float8") tokens.push_back({TokenType::TOK_FLOAT8_TYPE, ident, startLine, startCol});
+            else if (ident == "int4") tokens.push_back({TokenType::TOK_INT4_TYPE, ident, startLine, startCol});
+            else if (ident == "int8") tokens.push_back({TokenType::TOK_INT8_TYPE, ident, startLine, startCol});
             else if (ident == "new") tokens.push_back({TokenType::TOK_NEW, ident, startLine, startCol});
             else if (ident == "free") tokens.push_back({TokenType::TOK_FREE, ident, startLine, startCol});
             else if (ident == "export") tokens.push_back({TokenType::TOK_EXPORT, ident, startLine, startCol});

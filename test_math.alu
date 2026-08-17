@@ -1,0 +1,4 @@
+// Auto-generated bindings for test_math.h
+
+extern routine custom_pow ( double base , double exp ) -> double ;
+extern routine add_integers ( int a , int b ) -> int ;

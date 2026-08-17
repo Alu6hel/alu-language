@@ -1,0 +1,14 @@
+import std::io;
+
+routine fib(int n) -> int {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+routine main() -> int {
+    int result = fib(40);
+    printf("Fibonacci(40) = %d\n", result);
+    return 0;
+}

@@ -94,14 +94,31 @@ std::unique_ptr<ASTNode> Parser::parseExpression() {
         advance();
         std::string typeName = parseTypeString();
         left = attachLoc(std::make_unique<NewAllocationNode>(typeName), startTok);
+    } else if (currentToken().type == TokenType::TOK_FLOAT4_TYPE || 
+               currentToken().type == TokenType::TOK_FLOAT8_TYPE || 
+               currentToken().type == TokenType::TOK_INT4_TYPE || 
+               currentToken().type == TokenType::TOK_INT8_TYPE) {
+        std::string vtype = currentToken().value;
+        advance(); // consume type token
+        expect(TokenType::TOK_LPAREN);
+        std::vector<std::unique_ptr<ASTNode>> args;
+        if (currentToken().type != TokenType::TOK_RPAREN) {
+            args.push_back(parseExpression());
+            while (currentToken().type == TokenType::TOK_COMMA) {
+                advance();
+                args.push_back(parseExpression());
+            }
+        }
+        expect(TokenType::TOK_RPAREN);
+        left = attachLoc(std::make_unique<VectorInitNode>(vtype, std::move(args)), startTok);
     } else if (currentToken().type == TokenType::TOK_INT_TYPE || 
                currentToken().type == TokenType::TOK_FLOAT_TYPE || 
                currentToken().type == TokenType::TOK_DOUBLE_TYPE || 
-               currentToken().type == TokenType::TOK_BYTE_TYPE) {
+               currentToken().type == TokenType::TOK_BYTE_TYPE || currentToken().type == TokenType::TOK_FLOAT4_TYPE || currentToken().type == TokenType::TOK_FLOAT8_TYPE || currentToken().type == TokenType::TOK_INT4_TYPE || currentToken().type == TokenType::TOK_INT8_TYPE) {
         DataType targetType = DataType::INT;
         if (currentToken().type == TokenType::TOK_FLOAT_TYPE) targetType = DataType::FLOAT;
         else if (currentToken().type == TokenType::TOK_DOUBLE_TYPE) targetType = DataType::DOUBLE;
-        else if (currentToken().type == TokenType::TOK_BYTE_TYPE) targetType = DataType::BYTE;
+        else if (currentToken().type == TokenType::TOK_BYTE_TYPE || currentToken().type == TokenType::TOK_FLOAT4_TYPE || currentToken().type == TokenType::TOK_FLOAT8_TYPE || currentToken().type == TokenType::TOK_INT4_TYPE || currentToken().type == TokenType::TOK_INT8_TYPE) targetType = DataType::BYTE;
         advance(); // consume type token
         expect(TokenType::TOK_LPAREN);
         auto expr = parseExpression();
@@ -276,6 +293,16 @@ std::unique_ptr<ASTNode> Parser::parseVarDecl() {
     Token startTok = currentToken();
     std::string typeStr = parseTypeString();
 
+    std::string refinement_var = "";
+    std::unique_ptr<ASTNode> refinement_expr = nullptr;
+    if (currentToken().type == TokenType::TOK_LBRACE) {
+        advance(); // {
+        refinement_var = currentToken().value;
+        expect(TokenType::TOK_IDENTIFIER);
+        expect(TokenType::TOK_BIT_OR); // |
+        refinement_expr = parseExpression();
+        expect(TokenType::TOK_RBRACE); // }
+    }
     
     // pointers/arrays are handled in parseTypeString
     
@@ -301,7 +328,10 @@ std::unique_ptr<ASTNode> Parser::parseVarDecl() {
     
     expect(TokenType::TOK_SEMICOLON);
     
-    return attachLoc(std::make_unique<VarDeclNode>(typeStr, name, std::move(expr)), startTok);
+    auto node = std::make_unique<VarDeclNode>(typeStr, name, std::move(expr));
+      node->refinement_var = refinement_var;
+      node->refinement_expr = std::move(refinement_expr);
+      return attachLoc(std::move(node), startTok);
 }
 
 std::vector<std::unique_ptr<ASTNode>> Parser::parseBlock() {
@@ -354,7 +384,7 @@ std::unique_ptr<ForNode> Parser::parseForStatement() {
     if (currentToken().type != TokenType::TOK_SEMICOLON) {
         if (currentToken().type == TokenType::TOK_INT_TYPE || currentToken().type == TokenType::TOK_STRING_TYPE ||
             currentToken().type == TokenType::TOK_BOOL_TYPE || currentToken().type == TokenType::TOK_FLOAT_TYPE || 
-            currentToken().type == TokenType::TOK_DOUBLE_TYPE || currentToken().type == TokenType::TOK_BYTE_TYPE) {
+            currentToken().type == TokenType::TOK_DOUBLE_TYPE || currentToken().type == TokenType::TOK_BYTE_TYPE || currentToken().type == TokenType::TOK_FLOAT4_TYPE || currentToken().type == TokenType::TOK_FLOAT8_TYPE || currentToken().type == TokenType::TOK_INT4_TYPE || currentToken().type == TokenType::TOK_INT8_TYPE) {
             // Variable declaration without trailing semicolon (we consume it below)
             std::string typeStr = parseTypeString();
             std::string name = currentToken().value;
@@ -574,7 +604,7 @@ std::unique_ptr<ASTNode> Parser::parseStatement() {
         return parseUnsafeBlock();
     } else if (currentToken().type == TokenType::TOK_ASM) {
         return parseAsmCall();
-    } else if (currentToken().type == TokenType::TOK_INT_TYPE || currentToken().type == TokenType::TOK_STRING_TYPE || currentToken().type == TokenType::TOK_BOOL_TYPE || currentToken().type == TokenType::TOK_FLOAT_TYPE || currentToken().type == TokenType::TOK_DOUBLE_TYPE || currentToken().type == TokenType::TOK_BYTE_TYPE) {
+    } else if (currentToken().type == TokenType::TOK_INT_TYPE || currentToken().type == TokenType::TOK_STRING_TYPE || currentToken().type == TokenType::TOK_BOOL_TYPE || currentToken().type == TokenType::TOK_FLOAT_TYPE || currentToken().type == TokenType::TOK_DOUBLE_TYPE || currentToken().type == TokenType::TOK_BYTE_TYPE || currentToken().type == TokenType::TOK_FLOAT4_TYPE || currentToken().type == TokenType::TOK_FLOAT8_TYPE || currentToken().type == TokenType::TOK_INT4_TYPE || currentToken().type == TokenType::TOK_INT8_TYPE) {
         return parseVarDecl();
     } else if (currentToken().type == TokenType::TOK_IF) {
         return parseIfStatement();
@@ -797,10 +827,20 @@ std::unique_ptr<RoutineNode> Parser::parseRoutine(bool isExported) {
     expect(TokenType::TOK_LPAREN);
     while (currentToken().type != TokenType::TOK_RPAREN && currentToken().type != TokenType::TOK_EOF) {
         std::string pType = parseTypeString();
-        // pointers and arrays are now handled by parseTypeString, so we don't need the inner while loop here
+        std::string pRefVar = "";
+        std::shared_ptr<ASTNode> pRefExpr = nullptr;
+        if (currentToken().type == TokenType::TOK_LBRACE) {
+            advance(); // {
+            pRefVar = currentToken().value;
+            expect(TokenType::TOK_IDENTIFIER);
+            expect(TokenType::TOK_BIT_OR); // |
+            pRefExpr = std::shared_ptr<ASTNode>(parseExpression().release());
+            expect(TokenType::TOK_RBRACE); // }
+        }
+        
         std::string pName = currentToken().value;
         advance();
-        routine->params.push_back({pType, pName});
+        routine->params.push_back({pType, pName, pRefVar, pRefExpr});
         
         if (currentToken().type == TokenType::TOK_COMMA) advance();
     }

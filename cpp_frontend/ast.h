@@ -26,7 +26,11 @@ enum class DataType {
     ARRAY,
     FLOAT,
     DOUBLE,
-    BYTE
+    BYTE,
+    FLOAT4,
+    FLOAT8,
+    INT4,
+    INT8
 };
 
 inline std::string DataTypeToString(DataType type) {
@@ -40,6 +44,10 @@ inline std::string DataTypeToString(DataType type) {
         case DataType::FLOAT: return "FLOAT";
         case DataType::DOUBLE: return "DOUBLE";
         case DataType::BYTE: return "BYTE";
+        case DataType::FLOAT4: return "FLOAT4";
+        case DataType::FLOAT8: return "FLOAT8";
+        case DataType::INT4: return "INT4";
+        case DataType::INT8: return "INT8";
         default: return "UNKNOWN";
     }
 }
@@ -89,6 +97,28 @@ public:
     }
 };
 
+class VectorInitNode : public ASTNode {
+public:
+    std::string typeName;
+    std::vector<std::unique_ptr<ASTNode>> elements;
+
+    VectorInitNode(std::string t, std::vector<std::unique_ptr<ASTNode>> elems) 
+        : typeName(t), elements(std::move(elems)) {}
+        
+    void print(int indent = 0) const override {
+        std::cout << std::string(indent, ' ') << "[VectorInit] " << typeName << std::endl;
+        for (const auto& el : elements) {
+            el->print(indent + 4);
+        }
+    }
+    void codegen(LLVMCodeGen& cg) override;
+    std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
+        std::vector<std::unique_ptr<ASTNode>> cloned_elems;
+        for (const auto& e : elements) cloned_elems.push_back(e->clone(type_map));
+        return std::make_unique<VectorInitNode>(typeName, std::move(cloned_elems));
+    }
+};
+
 // Literal Node (e.g., 5 or "hello")
 class LiteralNode : public ASTNode {
 public:
@@ -127,17 +157,22 @@ public:
 class VarDeclNode : public ASTNode {
 public:
     std::string varType;
+    std::string refinement_var;
+    std::unique_ptr<ASTNode> refinement_expr;
     std::string name;
     std::unique_ptr<ASTNode> initializer;
     VarDeclNode(std::string t, std::string n, std::unique_ptr<ASTNode> init) 
-        : varType(t), name(n), initializer(std::move(init)) {}
+        : varType(t), refinement_var(""), refinement_expr(nullptr), name(n), initializer(std::move(init)) {}
     void print(int indent = 0) const override {
         std::cout << std::string(indent, ' ') << "[VarDecl] " << varType << " " << name << std::endl;
         if (initializer) initializer->print(indent + 4);
     }
     void codegen(LLVMCodeGen& cg) override;
     std::unique_ptr<ASTNode> clone(const std::map<std::string, std::string>& type_map) const override {
-        return std::make_unique<VarDeclNode>(replaceTypeVars(varType, type_map), name, initializer ? initializer->clone(type_map) : nullptr);
+        auto n = std::make_unique<VarDeclNode>(replaceTypeVars(varType, type_map), name, initializer ? initializer->clone(type_map) : nullptr);
+        n->refinement_var = refinement_var;
+        if (refinement_expr) n->refinement_expr = refinement_expr->clone(type_map);
+        return n;
     }
 };
 
@@ -415,6 +450,8 @@ public:
 struct Parameter {
     std::string type;
     std::string name;
+    std::string refinement_var;
+    std::shared_ptr<ASTNode> refinement_expr;
 };
 
 // Struct Field Struct

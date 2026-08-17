@@ -70,9 +70,7 @@ private:
     void verifyRequiresAtCallSite(const std::string& calleeName,
                                   const std::vector<std::unique_ptr<ASTNode>>& actual_args);
     void verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr);
-    z3::expr evalAnnotationExpr(ASTNode* expr,
-                                const std::vector<Parameter>& formal_params,
-                                const std::vector<z3::expr>& actual_exprs);
+    z3::expr evalAnnotationExpr(ASTNode* expr, const std::vector<Parameter>& formal_params, const std::vector<ASTNode*>& actual_args);
     bool isStringLiteralAnnotation(ASTNode* expr);
 
 public:

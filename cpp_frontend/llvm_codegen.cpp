@@ -159,17 +159,22 @@ void LLVMCodeGen::emit(const std::string& code, ASTNode* node) {
         }
     }
     
-    ir_output << final_code << "\n";
+    (*current_output) << final_code << "\n";
     
     if (code.find("  ret ") == 0 || code.find("  br ") == 0 || code.find("  unreachable") == 0) {
         block_terminated = true;
     }
 }
 
+void LLVMCodeGen::emitAlloca(const std::string& code) {
+    allocas.push_back(code);
+}
+
 // --- Scope Management ---
 
 void LLVMCodeGen::pushScope() {
     var_type_stack.emplace_back();
+    alu_type_stack.emplace_back();
     struct_type_stack.emplace_back();
     ir_name_stack.emplace_back();
 }
@@ -187,8 +192,14 @@ void LLVMCodeGen::emitScopeReleases(int levels) {
             const std::string& var_name = pair.first;
             const std::string& llvm_type = pair.second;
             
+            std::string alu_type = "";
+            auto alu_it = alu_type_stack[i].find(var_name);
+            if (alu_it != alu_type_stack[i].end()) {
+                alu_type = alu_it->second;
+            }
+            
             // If it is an ARC-managed pointer
-            if (llvm_type.find("*") != std::string::npos && llvm_type.find("[") == std::string::npos) {
+            if (alu_type == "string" || alu_type.find("managed<") == 0) {
                 auto name_it = current_names.find(var_name);
                 if (name_it != current_names.end()) {
                     std::string irName = name_it->second;
@@ -211,6 +222,7 @@ void LLVMCodeGen::popScope() {
     }
 
     if (!var_type_stack.empty()) var_type_stack.pop_back();
+    if (!alu_type_stack.empty()) alu_type_stack.pop_back();
     if (!struct_type_stack.empty()) struct_type_stack.pop_back();
     if (!ir_name_stack.empty()) ir_name_stack.pop_back();
 }
@@ -234,6 +246,20 @@ std::string LLVMCodeGen::lookupStructType(const std::string& name) {
 void LLVMCodeGen::declareVarType(const std::string& name, const std::string& llvmType) {
     if (!var_type_stack.empty()) {
         var_type_stack.back()[name] = llvmType;
+    }
+}
+
+std::string LLVMCodeGen::lookupAluType(const std::string& name) {
+    for (int i = (int)alu_type_stack.size() - 1; i >= 0; --i) {
+        auto it = alu_type_stack[i].find(name);
+        if (it != alu_type_stack[i].end()) return it->second;
+    }
+    return "";
+}
+
+void LLVMCodeGen::declareAluType(const std::string& name, const std::string& aluType) {
+    if (!alu_type_stack.empty()) {
+        alu_type_stack.back()[name] = aluType;
     }
 }
 
@@ -308,6 +334,7 @@ void YieldNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ResumeNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void ProgramNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 void NamespaceNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
+void VectorInitNode::codegen(LLVMCodeGen& cg) { cg.visit(this); }
 
 // --- LLVMCodeGen Visitor Implementation --- //
 
@@ -433,13 +460,11 @@ void LLVMCodeGen::visit(AsmCallNode* node) {
     // We will simplify and just assume it's stored in a variable or emit a basic global.
     
     // The easiest way for text emission prototyping: declare the global string inline as a constant 
-    std::string str_name = "@.str." + std::to_string(tmp_counter++);
     std::string str_val = "c\"" + text + "\\00\"";
     int len = text.length() + 1;
     
-    // Hack for text IR: we can't emit globals inside a function, so we'll just emit an alloca, store, and call.
     std::string reg = getTempReg();
-    emit("  " + reg + " = alloca [" + std::to_string(len) + " x i8], align 1");
+    emitAlloca("  " + reg + " = alloca [" + std::to_string(len) + " x i8], align 1");
     emit("  store [" + std::to_string(len) + " x i8] " + str_val + ", [" + std::to_string(len) + " x i8]* " + reg + ", align 1");
     std::string ptr_reg = getTempReg();
     emit("  " + ptr_reg + " = bitcast [" + std::to_string(len) + " x i8]* " + reg + " to i8*");
@@ -493,26 +518,36 @@ std::string LLVMCodeGen::getNamespacedName(const std::string& name) {
 }
 
 std::string LLVMCodeGen::getLLVMType(const std::string& type) {
-      static std::ofstream d_log("dump_types.log", std::ios_base::app);
-      d_log << "GETLLVMTYPE: '" << type << "'" << std::endl;
-      
-      if (type.find("ptr") == 0) {
-          size_t pos1 = type.find("<");
-          size_t pos2 = type.rfind(">");
-          if (pos1 != std::string::npos && pos2 != std::string::npos && pos2 > pos1) {
-              std::string base = type.substr(pos1 + 1, pos2 - pos1 - 1);
-              while (!base.empty() && base.back() == ' ') base.pop_back();
-              while (!base.empty() && base.front() == ' ') base.erase(0, 1);
-              return getLLVMType(base) + "*";
-          }
-      }
-      if (type == "int") return "i32";
-    if (type == "float") return "float";
-    if (type == "double") return "double";
-    if (type == "string") return "i8*";
-    if (type == "bool") return "i1";
-    if (type == "void") return "void";
-    if (type == "byte") return "i8";
+    static std::ofstream d_log("dump_types.log", std::ios_base::app);
+    d_log << "GETLLVMTYPE: '" << type << "'" << std::endl;
+    
+    std::string clean_type = type;
+    size_t unit_start = clean_type.find('<');
+    if (unit_start != std::string::npos && clean_type.find("ptr<") != 0 && clean_type.find("managed<") != 0 && clean_type.find("array<") != 0 && clean_type.find("routine<") != 0) {
+        clean_type = clean_type.substr(0, unit_start);
+    }
+    
+    if (type.find("ptr<") == 0 || type.find("managed<") == 0) {
+        size_t pos1 = type.find("<");
+        size_t pos2 = type.rfind(">");
+        if (pos1 != std::string::npos && pos2 != std::string::npos && pos2 > pos1) {
+            std::string base = type.substr(pos1 + 1, pos2 - pos1 - 1);
+            while (!base.empty() && base.back() == ' ') base.pop_back();
+            while (!base.empty() && base.front() == ' ') base.erase(0, 1);
+            return getLLVMType(base) + "*";
+        }
+    }
+      if (clean_type == "int") return "i32";
+    if (clean_type == "float") return "float";
+    if (clean_type == "double") return "double";
+    if (clean_type == "string") return "i8*";
+    if (clean_type == "bool") return "i1";
+    if (clean_type == "void") return "void";
+    if (clean_type == "byte") return "i8";
+    if (clean_type == "float4") return "<4 x float>";
+    if (clean_type == "float8") return "<8 x float>";
+    if (clean_type == "int4") return "<4 x i32>";
+    if (clean_type == "int8") return "<8 x i32>";
     if (type == "routine") return "i8*";
     if (type == "routine") return "i8*";
     if (type.find("[]") != std::string::npos) {
@@ -530,6 +565,22 @@ std::string LLVMCodeGen::getLLVMType(const std::string& type) {
         return getLLVMType(base) + "*";
     }
     return "%" + getNamespacedName(type) + "*"; // Custom types are passed by reference
+}
+
+std::string LLVMCodeGen::visit(VectorInitNode* node) {
+    std::string llvm_type = getLLVMType(node->typeName);
+    std::string current_vec = "undef";
+    
+    std::string base_type = "float";
+    if (node->typeName == "int4" || node->typeName == "int8") base_type = "i32";
+    
+    for (size_t i = 0; i < node->elements.size(); ++i) {
+        std::string val_reg = evaluateExpression(node->elements[i].get());
+        std::string next_vec = getTempReg();
+        emit("  " + next_vec + " = insertelement " + llvm_type + " " + current_vec + ", " + base_type + " " + val_reg + ", i32 " + std::to_string(i), node);
+        current_vec = next_vec;
+    }
+    return current_vec;
 }
 
 std::string LLVMCodeGen::visit(LiteralNode* node) {
@@ -598,8 +649,9 @@ std::string LLVMCodeGen::visit(VarAccessNode* node) {
     std::string reg = getTempReg();
     emit("  " + reg + " = load " + llvm_type + ", " + llvm_type + "* %" + irName + ", align 4");
     
-    // ARC: If it's a pointer, retain it.
-    if (llvm_type.find("*") != std::string::npos && llvm_type.find("[") == std::string::npos) {
+    // ARC: If it's a managed pointer, retain it.
+    std::string alu_type = lookupAluType(node->name);
+    if (alu_type == "string" || alu_type.find("managed<") == 0) {
         std::string cast_reg = getTempReg();
         emit("  " + cast_reg + " = bitcast " + llvm_type + " " + reg + " to i8*");
         emit("  call void @alu_retain(i8* " + cast_reg + ")");
@@ -699,8 +751,9 @@ void LLVMCodeGen::visit(ArrayDeclNode* node) {
     
     // alloca array type
     std::string array_llvm_type = "[" + size_val + " x " + llvm_type + "]";
-    emit("  %" + irName + " = alloca " + array_llvm_type + ", align 4");
+    emitAlloca("  %" + irName + " = alloca " + array_llvm_type + ", align 4");
     declareVarType(node->name, array_llvm_type);
+    declareAluType(node->name, "array<" + node->type + ">");
 }
 
 std::string LLVMCodeGen::visit(ArrayIndexNode* node) {
@@ -807,10 +860,14 @@ std::string LLVMCodeGen::visit(BinOpNode* node) {
         return res_reg;
     }
 
-    bool isFloat = (ltype == "float" || rtype == "float" || ltype == "double" || rtype == "double");
+    bool isFloat = (ltype == "float" || rtype == "float" || ltype == "double" || rtype == "double" || ltype == "<4 x float>" || ltype == "<8 x float>");
     std::string opType = "i32";
     if (ltype == "double" || rtype == "double") opType = "double";
     else if (ltype == "float" || rtype == "float") opType = "float";
+    else if (ltype == "<4 x float>") opType = "<4 x float>";
+    else if (ltype == "<8 x float>") opType = "<8 x float>";
+    else if (ltype == "<4 x i32>") opType = "<4 x i32>";
+    else if (ltype == "<8 x i32>") opType = "<8 x i32>";
     else if (ltype == "i8" && rtype == "i8") opType = "i8";
     else if (ltype == "i1" && rtype == "i1") opType = "i1";
 
@@ -976,8 +1033,9 @@ void LLVMCodeGen::visit(VarDeclNode* node) {
     // 1. Allocate memory on the stack (alloca)
     std::string llvm_type = getLLVMType(node->varType);
     std::string irName = getUniqueName(node->name);
-    emit("  %" + irName + " = alloca " + llvm_type + ", align 4");
+    emitAlloca("  %" + irName + " = alloca " + llvm_type + ", align 4");
     declareVarType(node->name, llvm_type);
+    declareAluType(node->name, node->varType);
     
     if (node->varType != "int" && node->varType != "string" && node->varType != "bool" && node->varType != "float" && node->varType != "double" && node->varType != "byte") {
         declareStructType(node->name, node->varType);
@@ -1273,8 +1331,9 @@ void LLVMCodeGen::visit(TryCatchNode* node) {
     std::string catch_var_ir = lookupIRName(node->catch_var_name);
     // Determine LLVM type for catch_var
     std::string llvm_catch_type = getLLVMType(node->catch_var_type);
-    emit("  %" + catch_var_ir + " = alloca " + llvm_catch_type + ", align 8");
+    emitAlloca("  %" + catch_var_ir + " = alloca " + llvm_catch_type + ", align 8");
     declareVarType(node->catch_var_name, llvm_catch_type);
+    declareAluType(node->catch_var_name, node->catch_var_type);
     if (node->catch_var_type != "int" && node->catch_var_type != "string" && node->catch_var_type != "bool") {
         declareStructType(node->catch_var_name, node->catch_var_type);
     }
@@ -1436,13 +1495,22 @@ void LLVMCodeGen::visit(RoutineNode* node) {
     
     emit(def_str);
     emit("entry:");
-    emit("  %current_exception = alloca i8*, align 8");
+    
+    // Setup buffering for body and allocas
+    allocas.clear();
+    std::stringstream body_output;
+    std::stringstream* prev_output = current_output;
+    current_output = &body_output;
+    
+    emitAlloca("  %current_exception = alloca i8*, align 8");
     emit("  store i8* null, i8** %current_exception, align 8");
     
     // Allocate stack space for parameters
     for (const auto& p : node->params) {
         std::string ptype = getLLVMType(p.type);
-        emit("  %" + p.name + " = alloca " + ptype + ", align 4");
+        declareVarType(p.name, ptype);
+        declareAluType(p.name, p.type);
+        emitAlloca("  %" + p.name + " = alloca " + ptype + ", align 4");
         emit("  store " + ptype + " %in_" + p.name + ", " + ptype + "* %" + p.name + ", align 4");
         
         declareVarType(p.name, ptype);
@@ -1471,6 +1539,19 @@ void LLVMCodeGen::visit(RoutineNode* node) {
     } else {
         emit("  ret void");
     }
+    
+    // Restore output and flush
+    current_output = prev_output;
+    
+    // Force block_terminated to false so allocas are printed
+    block_terminated = false;
+    for (const auto& al : allocas) {
+        emit(al);
+    }
+    (*current_output) << body_output.str();
+    
+    // Reset block terminated so the closing brace is printed
+    block_terminated = false;
     emit("}\n");
     
     // We already released, just pop the stack silently
@@ -1520,6 +1601,26 @@ void LLVMCodeGen::visit(StructDefNode* node) {
 
 std::string LLVMCodeGen::visit(MemberAccessNode* node) {
     if (emit_debug_info) current_debug_node = node;
+    
+    std::string aluType = lookupAluType(node->objectName);
+    if (aluType == "float4" || aluType == "float8" || aluType == "int4" || aluType == "int8") {
+        int idx = 0;
+        if (node->fieldName == "x") idx = 0;
+        else if (node->fieldName == "y") idx = 1;
+        else if (node->fieldName == "z") idx = 2;
+        else if (node->fieldName == "w") idx = 3;
+        
+        std::string obj_ir = lookupIRName(node->objectName);
+        std::string llvmType = getLLVMType(aluType);
+        
+        std::string vec_val = getTempReg();
+        emit("  " + vec_val + " = load " + llvmType + ", " + llvmType + "* %" + obj_ir + ", align 16", node);
+        
+        std::string res = getTempReg();
+        emit("  " + res + " = extractelement " + llvmType + " " + vec_val + ", i32 " + std::to_string(idx), node);
+        return res;
+    }
+
     std::string structName = lookupStructType(node->objectName);
     structName = sanitizeLLVMName(structName);
     
@@ -1548,6 +1649,31 @@ std::string LLVMCodeGen::visit(MemberAccessNode* node) {
 
 void LLVMCodeGen::visit(MemberAssignNode* node) {
     if (emit_debug_info) current_debug_node = node;
+    
+    std::string aluType = lookupAluType(node->objectName);
+    if (aluType == "float4" || aluType == "float8" || aluType == "int4" || aluType == "int8") {
+        int idx = 0;
+        if (node->fieldName == "x") idx = 0;
+        else if (node->fieldName == "y") idx = 1;
+        else if (node->fieldName == "z") idx = 2;
+        else if (node->fieldName == "w") idx = 3;
+        
+        std::string obj_ir = lookupIRName(node->objectName);
+        std::string llvmType = getLLVMType(aluType);
+        
+        std::string vec_val = getTempReg();
+        emit("  " + vec_val + " = load " + llvmType + ", " + llvmType + "* %" + obj_ir + ", align 16", node);
+        
+        std::string rhs_reg = evaluateExpression(node->expr.get());
+        std::string res = getTempReg();
+        std::string base_type = "float";
+        if (aluType == "int4" || aluType == "int8") base_type = "i32";
+        
+        emit("  " + res + " = insertelement " + llvmType + " " + vec_val + ", " + base_type + " " + rhs_reg + ", i32 " + std::to_string(idx), node);
+        emit("  store " + llvmType + " " + res + ", " + llvmType + "* %" + obj_ir + ", align 16", node);
+        return;
+    }
+
     std::string structName = lookupStructType(node->objectName);
     structName = sanitizeLLVMName(structName);
     

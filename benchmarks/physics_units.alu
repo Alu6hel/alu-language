@@ -1,0 +1,6 @@
+export routine main() -> int {
+    float<m/s> velocity = 5.0;
+    float<s> time = 2.0;
+    float<m> distance = velocity * time;
+    return 0;
+}

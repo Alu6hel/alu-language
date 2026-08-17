@@ -2,6 +2,90 @@
 #include <stdexcept>
 #include <iostream>
 #include <typeinfo>
+#include <sstream>
+
+// --- Unit Management ---
+
+std::map<std::string, int> parseUnit(const std::string& unitStr) {
+    std::map<std::string, int> units;
+    if (unitStr.empty()) return units;
+    
+    // Simplistic unit parser for kg*m/s^2 etc.
+    // Assuming format like A*B/C^2
+    std::string current_unit;
+    int current_sign = 1; // 1 for numerator, -1 for denominator
+    
+    for (size_t i = 0; i < unitStr.length(); ++i) {
+        char c = unitStr[i];
+        if (std::isalpha(c)) {
+            current_unit += c;
+        } else {
+            if (!current_unit.empty()) {
+                int power = 1;
+                if (c == '^') {
+                    std::string power_str;
+                    i++;
+                    while (i < unitStr.length() && (std::isdigit(unitStr[i]) || unitStr[i] == '-')) {
+                        power_str += unitStr[i];
+                        i++;
+                    }
+                    if (!power_str.empty()) power = std::stoi(power_str);
+                    i--; // adjust for loop increment
+                }
+                units[current_unit] += current_sign * power;
+                current_unit.clear();
+            }
+            if (c == '*') current_sign = 1;
+            else if (c == '/') current_sign = -1;
+        }
+    }
+    if (!current_unit.empty()) {
+        units[current_unit] += current_sign;
+    }
+    
+    // Clean up zero powers
+    for (auto it = units.begin(); it != units.end(); ) {
+        if (it->second == 0) it = units.erase(it);
+        else ++it;
+    }
+    return units;
+}
+
+std::string formatUnit(const std::map<std::string, int>& units) {
+    if (units.empty()) return "";
+    std::string num = "", den = "";
+    bool first_num = true, first_den = true;
+    
+    for (const auto& kv : units) {
+        if (kv.second > 0) {
+            if (!first_num) num += "*";
+            num += kv.first;
+            if (kv.second > 1) num += "^" + std::to_string(kv.second);
+            first_num = false;
+        } else if (kv.second < 0) {
+            if (!first_den) den += "*";
+            den += kv.first;
+            if (kv.second < -1) den += "^" + std::to_string(-kv.second);
+            first_den = false;
+        }
+    }
+    
+    std::string result = num;
+    if (!den.empty()) {
+        if (result.empty()) result = "1";
+        result += "/" + den;
+    }
+    return result;
+}
+
+std::string extractUnit(const std::string& typeStr) {
+    size_t start = typeStr.find('<');
+    size_t end = typeStr.rfind('>');
+    if (start != std::string::npos && end != std::string::npos && end > start && typeStr.find("ptr<") != 0 && typeStr.find("managed<") != 0 && typeStr.find("array<") != 0 && typeStr.find("routine<") != 0) {
+        return typeStr.substr(start + 1, end - start - 1);
+    }
+    return "";
+}
 
 // --- Scope Management ---
 
@@ -80,10 +164,11 @@ bool SemanticAnalyzer::isDeclaredInCurrentScope(const std::string& name) {
     return scope_stack.back().find(name) != scope_stack.back().end();
 }
 
-void SemanticAnalyzer::declareSymbol(const std::string& name, DataType type, int line, int col, const std::string& file) {
+void SemanticAnalyzer::declareSymbol(const std::string& name, DataType type, const std::string& unit, int line, int col, const std::string& file) {
     if (!scope_stack.empty()) {
         SymbolMeta meta;
         meta.type = type;
+        meta.unit = unit;
         meta.def_line = line;
         meta.def_col = col;
         meta.def_file = file;
@@ -154,12 +239,19 @@ void SemanticAnalyzer::instantiateTemplateIfNeeded(const std::string& typeStr) {
 }
 
 DataType SemanticAnalyzer::parseDataType(const std::string& rawTypeStr) {
-        std::string typeStr = resolveName(rawTypeStr);
+    std::string typeStr = resolveName(rawTypeStr);
     instantiateTemplateIfNeeded(typeStr);
     std::string base = typeStr;
+    
+    std::string clean_base = base;
+    size_t unit_start = clean_base.find('<');
+    if (unit_start != std::string::npos && clean_base.find("ptr<") != 0 && clean_base.find("managed<") != 0 && clean_base.find("array<") != 0 && clean_base.find("routine<") != 0) {
+        base = clean_base.substr(0, unit_start);
+    }
+
     bool isPointer = false;
     
-    if (base.find("ptr<") == 0) {
+    if (base.find("ptr<") == 0 || base.find("managed<") == 0) {
         isPointer = true;
     }
     
@@ -183,24 +275,50 @@ DataType SemanticAnalyzer::parseDataType(const std::string& rawTypeStr) {
     if (base == "float") return DataType::FLOAT;
     if (base == "double") return DataType::DOUBLE;
     if (base == "void") return DataType::VOID;
+    if (base == "float4") return DataType::FLOAT4;
+    if (base == "float8") return DataType::FLOAT8;
+    if (base == "int4") return DataType::INT4;
+    if (base == "int8") return DataType::INT8;
     return DataType::UNKNOWN;
 }
 
 // --- Expression Type Checking ---
 
-DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
-    if (!expr) return DataType::UNKNOWN;
+TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
+    if (!expr) return {DataType::UNKNOWN, ""};
     
     if (auto literal = dynamic_cast<LiteralNode*>(expr)) {
         if (literal->type == DataType::UNKNOWN) {
             // It's a variable reference
-            DataType t;
-            if (!lookupSymbol(literal->value, t)) {
+            SymbolMeta meta;
+            if (!lookupSymbolMeta(literal->value, meta)) {
                 throw std::runtime_error("Semantic Error: Undefined variable '" + literal->value + "'");
             }
-            return t;
+            return {meta.type, meta.unit};
         }
-        return literal->type;
+        return {literal->type, ""};
+    }
+    else if (auto vecInit = dynamic_cast<VectorInitNode*>(expr)) {
+        DataType targetDT = parseDataType(vecInit->typeName);
+        int expected_args = 0;
+        DataType expected_base = DataType::UNKNOWN;
+        
+        if (targetDT == DataType::FLOAT4) { expected_args = 4; expected_base = DataType::FLOAT; }
+        else if (targetDT == DataType::FLOAT8) { expected_args = 8; expected_base = DataType::FLOAT; }
+        else if (targetDT == DataType::INT4) { expected_args = 4; expected_base = DataType::INT; }
+        else if (targetDT == DataType::INT8) { expected_args = 8; expected_base = DataType::INT; }
+        
+        if (vecInit->elements.size() != expected_args) {
+            throw std::runtime_error("Semantic Error: SIMD Vector " + vecInit->typeName + " requires exactly " + std::to_string(expected_args) + " arguments.");
+        }
+        
+        for (const auto& el : vecInit->elements) {
+            TypeInfo elType = checkExpression(el.get());
+            if (elType.type != expected_base) {
+                throw std::runtime_error("Semantic Error: SIMD Vector " + vecInit->typeName + " elements must be of base type " + DataTypeToString(expected_base) + ".");
+            }
+        }
+        return {targetDT, ""};
     }
     else if (auto funcCall = dynamic_cast<FuncCallNode*>(expr)) {
         std::string original_name = funcCall->name;
@@ -241,20 +359,21 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
         }
         
         if (function_table.find(funcCall->name) != function_table.end()) {
-            return function_table[funcCall->name].returnType;
+            return {function_table[funcCall->name].returnType, ""};
         }
-        return DataType::UNKNOWN;
+        return {DataType::UNKNOWN, ""};
     }
     else if (auto allocNode = dynamic_cast<NewAllocationNode*>(expr)) {
         allocNode->typeName = resolveName(allocNode->typeName);
-        return DataType::POINTER;
+        return {DataType::POINTER, ""};
     }
     else if (auto castNode = dynamic_cast<CastNode*>(expr)) {
         checkExpression(castNode->expr.get());
-        return castNode->targetType;
+        return {castNode->targetType, ""};
     }
     else if (auto arrIndex = dynamic_cast<ArrayIndexNode*>(expr)) {
-        DataType t = checkExpression(arrIndex->indexExpr.get());
+        TypeInfo t_info = checkExpression(arrIndex->indexExpr.get());
+        DataType t = t_info.type;
         if (t != DataType::INT) {
             if (!is_lsp_mode) { std::cerr << "INDEX ERROR ON: Array Index" << std::endl; arrIndex->indexExpr->print(0); }
             throw std::runtime_error("Semantic Error: Array index must be an integer");
@@ -268,36 +387,36 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
             if (fullType == "" && lookupSymbol(varNode->name, dt) && dt == DataType::STRING) fullType = "string";
         }
         
-        if (fullType == "int[]" || fullType == "int*" || fullType == "int") return DataType::INT;
-        if (fullType == "float[]" || fullType == "float*" || fullType == "float") return DataType::FLOAT;
-        if (fullType == "double[]" || fullType == "double*" || fullType == "double") return DataType::DOUBLE;
-        if (fullType == "byte[]" || fullType == "byte*" || fullType == "string") return DataType::BYTE;
-        if (fullType == "string[]" || fullType == "string*") return DataType::STRING;
+        if (fullType == "int[]" || fullType == "int*" || fullType == "int") return {DataType::INT, ""};
+        if (fullType == "float[]" || fullType == "float*" || fullType == "float") return {DataType::FLOAT, ""};
+        if (fullType == "double[]" || fullType == "double*" || fullType == "double") return {DataType::DOUBLE, ""};
+        if (fullType == "byte[]" || fullType == "byte*" || fullType == "string") return {DataType::BYTE, ""};
+        if (fullType == "string[]" || fullType == "string*") return {DataType::STRING, ""};
         
-        if (fullType.find("ptr<") == 0) {
+        if (fullType.find("ptr<") == 0 || fullType.find("managed<") == 0) {
             size_t p1 = fullType.find("<");
             size_t p2 = fullType.rfind(">");
             if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
                 std::string base = fullType.substr(p1 + 1, p2 - p1 - 1);
                 while (!base.empty() && base.back() == ' ') base.pop_back();
                 while (!base.empty() && base.front() == ' ') base.erase(0, 1);
-                return parseDataType(base);
+                return {parseDataType(base), ""};
             }
         }
         
-        return DataType::INT;
+        return {DataType::INT, ""};
     }
     
     else if (auto varNode = dynamic_cast<VarAccessNode*>(expr)) {
-        DataType t;
-        if (!lookupSymbol(varNode->name, t)) {
+        SymbolMeta meta;
+        if (!lookupSymbolMeta(varNode->name, meta)) {
             std::string sn;
             if (lookupStructVar(varNode->name, sn)) {
-                return parseDataType(sn);
+                return {parseDataType(sn), ""};
             }
             if (struct_table.find(varNode->name) != struct_table.end()) {
                 // It's an effect or raw struct type access, return a generic pointer type for now
-                return DataType::POINTER;
+                return {DataType::POINTER, ""};
             }
             if (!is_lsp_mode) { std::cerr << "VarAccess Error: " << varNode->name << std::endl; }
             throw std::runtime_error("Semantic Error: Undefined variable '" + varNode->name + "'");
@@ -310,29 +429,56 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
                 sym.col = varNode->col;
                 sym.length = varNode->name.length();
                 sym.name = varNode->name;
-                sym.hover_text = "variable " + varNode->name + " : " + DataTypeToString(t);
+                sym.hover_text = "variable " + varNode->name + " : " + DataTypeToString(meta.type) + (meta.unit.empty() ? "" : "<" + meta.unit + ">");
                 sym.def_line = meta.def_line;
                 sym.def_col = meta.def_col;
                 sym.def_file = meta.def_file;
                 lsp_symbols.push_back(sym);
             }
         }
-        return t;
+        return {meta.type, meta.unit};
     }
     else if (auto binOp = dynamic_cast<BinOpNode*>(expr)) {
-        DataType leftT = checkExpression(binOp->left.get());
-        DataType rightT = checkExpression(binOp->right.get());
-        
+        TypeInfo leftT_info = checkExpression(binOp->left.get());
+        DataType leftT = leftT_info.type;
+        TypeInfo rightT_info = checkExpression(binOp->right.get());
+        DataType rightT = rightT_info.type;
+
+        std::cout << "[DEBUG] BinOp " << binOp->op << " between <" << leftT_info.unit << "> and <" << rightT_info.unit << ">" << std::endl;
+
+        std::string res_unit = "";
+        if (!leftT_info.unit.empty() || !rightT_info.unit.empty()) {
+            if (binOp->op == "+" || binOp->op == "-") {
+                if (leftT_info.unit != rightT_info.unit && (!leftT_info.unit.empty() && !rightT_info.unit.empty())) {
+                    throw std::runtime_error("Semantic Error: Unit mismatch in addition/subtraction. <" + leftT_info.unit + "> vs <" + rightT_info.unit + ">");
+                }
+                res_unit = leftT_info.unit.empty() ? rightT_info.unit : leftT_info.unit;
+            } else if (binOp->op == "*") {
+                auto lu = parseUnit(leftT_info.unit);
+                auto ru = parseUnit(rightT_info.unit);
+                for (auto& kv : ru) lu[kv.first] += kv.second;
+                res_unit = formatUnit(lu);
+            } else if (binOp->op == "/") {
+                auto lu = parseUnit(leftT_info.unit);
+                auto ru = parseUnit(rightT_info.unit);
+                for (auto& kv : ru) lu[kv.first] -= kv.second;
+                res_unit = formatUnit(lu);
+            } else {
+                res_unit = leftT_info.unit.empty() ? rightT_info.unit : leftT_info.unit;
+            }
+        }
+
         if (binOp->op == "==" || binOp->op == "!=" || binOp->op == "<" || binOp->op == "<=" || binOp->op == ">" || binOp->op == ">=") {
-            return DataType::BOOL;
+            return {DataType::BOOL, ""};
         }
         
-        if (leftT == DataType::FLOAT || rightT == DataType::FLOAT) return DataType::FLOAT;
-        if (leftT == DataType::DOUBLE || rightT == DataType::DOUBLE) return DataType::DOUBLE;
-        return leftT != DataType::UNKNOWN ? leftT : rightT;
+        if (leftT == DataType::FLOAT || rightT == DataType::FLOAT) return {DataType::FLOAT, ""};
+        if (leftT == DataType::DOUBLE || rightT == DataType::DOUBLE) return {DataType::DOUBLE, ""};
+        return {leftT != DataType::UNKNOWN ? leftT : rightT, ""};
     }
     else if (auto methodCall = dynamic_cast<MethodCallNode*>(expr)) {
-        DataType objType = checkExpression(methodCall->object.get());
+        TypeInfo objType_info = checkExpression(methodCall->object.get());
+        DataType objType = objType_info.type;
         for (const auto& arg : methodCall->args) {
             checkExpression(arg.get());
         }
@@ -364,26 +510,39 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
                 sym.def_file = sig.def_file;
                 lsp_symbols.push_back(sym);
             }
-            return function_table[mangledName].returnType;
+            return {function_table[mangledName].returnType, ""};
         }
-        return DataType::UNKNOWN;
+        return {DataType::UNKNOWN, ""};
     }
     else if (auto memberAcc = dynamic_cast<MemberAccessNode*>(expr)) {
+        DataType dt;
+        if (lookupSymbol(memberAcc->objectName, dt)) {
+            if (dt == DataType::FLOAT4 || dt == DataType::FLOAT8) {
+                if (memberAcc->fieldName == "x" || memberAcc->fieldName == "y" || memberAcc->fieldName == "z" || memberAcc->fieldName == "w") {
+                    return {DataType::FLOAT, ""};
+                }
+            } else if (dt == DataType::INT4 || dt == DataType::INT8) {
+                if (memberAcc->fieldName == "x" || memberAcc->fieldName == "y" || memberAcc->fieldName == "z" || memberAcc->fieldName == "w") {
+                    return {DataType::INT, ""};
+                }
+            }
+        }
+        
         std::string structName;
         if (lookupStructVar(memberAcc->objectName, structName)) {
             if (struct_table.find(structName) != struct_table.end()) {
                 StructInfo& info = struct_table[structName];
                 for (const auto& field : info.fields) {
                     if (field.name == memberAcc->fieldName) {
-                        return parseDataType(field.type);
+                        return {parseDataType(field.type), ""};
                     }
                 }
             }
         }
-        return DataType::UNKNOWN;
+        return {DataType::UNKNOWN, ""};
     }
 
-    return DataType::UNKNOWN;
+    return {DataType::UNKNOWN, ""};
 }
 
 // --- Variable Declaration Checking ---
@@ -391,6 +550,17 @@ DataType SemanticAnalyzer::checkExpression(ASTNode* expr) {
 void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     decl->varType = resolveName(decl->varType);
     DataType expectedType = parseDataType(decl->varType);
+    std::string declared_unit = extractUnit(decl->varType);
+    
+    if (decl->refinement_expr) {
+        pushScope();
+        declareSymbol(decl->refinement_var, expectedType, declared_unit, decl->line, decl->col, decl->file);
+        TypeInfo ref_type = checkExpression(decl->refinement_expr.get());
+        if (ref_type.type != DataType::BOOL) {
+            throw std::runtime_error("Semantic Error: Refinement expression must evaluate to a boolean");
+        }
+        popScope();
+    }
     
     if (expectedType == DataType::UNKNOWN && struct_table.find(decl->varType) != struct_table.end()) {
         declareStructVar(decl->name, decl->varType);
@@ -398,7 +568,7 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
         pointer_var_table[decl->name] = decl->varType;
         std::string base = decl->varType;
         
-        if (base.find("ptr<") == 0) {
+        if (base.find("ptr<") == 0 || base.find("managed<") == 0) {
             size_t p1 = base.find("<");
             size_t p2 = base.rfind(">");
             if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
@@ -442,7 +612,12 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     
     // Check the expression it is initialized with
     if (decl->initializer) {
-        DataType actualType = checkExpression(decl->initializer.get());
+        TypeInfo actualType_info = checkExpression(decl->initializer.get());
+        DataType actualType = actualType_info.type;
+        std::string actual_unit = actualType_info.unit;
+        if (!declared_unit.empty() && !actual_unit.empty() && declared_unit != actual_unit) {
+            throw std::runtime_error("Semantic Error: Unit mismatch in variable declaration '" + decl->name + "'. Expected unit <" + declared_unit + "> but got <" + actual_unit + ">.");
+        }
         if (expectedType != DataType::UNKNOWN && expectedType != actualType && actualType != DataType::POINTER && actualType != DataType::UNKNOWN) {
             if (!((expectedType == DataType::INT && actualType == DataType::BYTE) || 
                   (expectedType == DataType::BYTE && actualType == DataType::INT) ||
@@ -458,7 +633,7 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
     }
     
     // Store in current scope
-    declareSymbol(decl->name, expectedType, decl->line, decl->col, decl->file);
+    declareSymbol(decl->name, expectedType, declared_unit, decl->line, decl->col, decl->file);
 }
 
 // --- Statement Checking ---
@@ -473,7 +648,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
             std::cerr << "[COMPILER ERROR] Semantic Error: Assignment to undefined variable '" << varassign->name << "'" << std::endl;
             exit(1);
         }
-        DataType exprType = checkExpression(varassign->expr.get());
+        TypeInfo exprType_info = checkExpression(varassign->expr.get());
+        DataType exprType = exprType_info.type;
         if (exprType != targetType) {
             if (!((exprType == DataType::INT && targetType == DataType::BYTE) || 
                   (exprType == DataType::BYTE && targetType == DataType::INT) ||
@@ -488,6 +664,26 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         }
     }
     else if (auto memberAssign = dynamic_cast<MemberAssignNode*>(stmt)) {
+        DataType dt;
+        bool is_vector = false;
+        DataType vec_base = DataType::UNKNOWN;
+        
+        if (lookupSymbol(memberAssign->objectName, dt)) {
+            if (dt == DataType::FLOAT4 || dt == DataType::FLOAT8) { is_vector = true; vec_base = DataType::FLOAT; }
+            if (dt == DataType::INT4 || dt == DataType::INT8) { is_vector = true; vec_base = DataType::INT; }
+        }
+        
+        if (is_vector) {
+            if (memberAssign->fieldName != "x" && memberAssign->fieldName != "y" && memberAssign->fieldName != "z" && memberAssign->fieldName != "w") {
+                throw std::runtime_error("Semantic Error: Invalid SIMD component '" + memberAssign->fieldName + "'.");
+            }
+            TypeInfo rhs = checkExpression(memberAssign->expr.get());
+            if (rhs.type != vec_base) {
+                throw std::runtime_error("Semantic Error: SIMD assignment type mismatch.");
+            }
+            return;
+        }
+
         std::string structName;
         if (!lookupStructVar(memberAssign->objectName, structName)) {
             throw std::runtime_error("Semantic Error: Variable '" + memberAssign->objectName + "' is not a struct.");
@@ -507,7 +703,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
             throw std::runtime_error("Semantic Error: Struct '" + structName + "' has no field '" + memberAssign->fieldName + "'");
         }
         
-        DataType valType = checkExpression(memberAssign->expr.get());
+        TypeInfo valType_info = checkExpression(memberAssign->expr.get());
+        DataType valType = valType_info.type;
         if (fieldType != DataType::UNKNOWN && fieldType != valType && valType != DataType::POINTER) {
             throw std::runtime_error("Semantic Error: Type mismatch in struct member assignment.");
         }
@@ -517,7 +714,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         array_var_table[arrDecl->name] = arrDecl->type;
         declareSymbol(arrDecl->name, DataType::ARRAY);
         
-        DataType sizeType = checkExpression(arrDecl->sizeExpr.get());
+        TypeInfo sizeType_info = checkExpression(arrDecl->sizeExpr.get());
+        DataType sizeType = sizeType_info.type;
         if (sizeType != DataType::INT) {
             throw std::runtime_error("Semantic Error: Array size must be an integer");
         }
@@ -531,7 +729,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
                 }
             }
         }
-        DataType idxType = checkExpression(arrAssign->indexExpr.get());
+        TypeInfo idxType_info = checkExpression(arrAssign->indexExpr.get());
+        DataType idxType = idxType_info.type;
         if (idxType != DataType::INT) {
             if (!is_lsp_mode) { std::cerr << "INDEX ERROR ON (ASSIGN): " << std::endl; arrAssign->indexExpr->print(0); }
             throw std::runtime_error("Semantic Error: Array index must be an integer");
@@ -543,13 +742,15 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         checkExpression(derefAssign->val_expr.get());
     }
     else if (auto freeNode = dynamic_cast<FreeNode*>(stmt)) {
-        DataType t = checkExpression(freeNode->expr.get());
+        TypeInfo t_info = checkExpression(freeNode->expr.get());
+        DataType t = t_info.type;
         if (t != DataType::POINTER && t != DataType::UNKNOWN) {
             throw std::runtime_error("Semantic Error: Cannot free a non-pointer type.");
         }
     }
     else if (auto ifNode = dynamic_cast<IfNode*>(stmt)) {
-        DataType condType = checkExpression(ifNode->condition.get());
+        TypeInfo condType_info = checkExpression(ifNode->condition.get());
+        DataType condType = condType_info.type;
         if (condType != DataType::BOOL) {
             throw std::runtime_error("Semantic Error: 'if' condition must evaluate to a boolean.");
         }
@@ -565,7 +766,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         }
     }
     else if (auto whileNode = dynamic_cast<WhileNode*>(stmt)) {
-        DataType condType = checkExpression(whileNode->condition.get());
+        TypeInfo condType_info = checkExpression(whileNode->condition.get());
+        DataType condType = condType_info.type;
         if (condType != DataType::BOOL) {
             throw std::runtime_error("Semantic Error: 'while' condition must evaluate to a boolean.");
         }
@@ -583,7 +785,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         
         // Check condition (must be bool)
         if (forNode->condition) {
-            DataType condType = checkExpression(forNode->condition.get());
+            TypeInfo condType_info = checkExpression(forNode->condition.get());
+        DataType condType = condType_info.type;
             if (condType != DataType::BOOL) {
                 throw std::runtime_error("Semantic Error: 'for' condition must evaluate to a boolean.");
             }
@@ -602,7 +805,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
     else if (auto returnNode = dynamic_cast<ReturnNode*>(stmt)) {
         DataType returnType = DataType::VOID;
         if (returnNode->expr) {
-            returnType = checkExpression(returnNode->expr.get());
+            TypeInfo returnType_info = checkExpression(returnNode->expr.get());
+            returnType = returnType_info.type;
         }
         if (returnType != current_routine_return_type && 
             returnType != DataType::UNKNOWN &&
@@ -632,7 +836,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         }
     }
     else if (auto throwNode = dynamic_cast<ThrowNode*>(stmt)) {
-        DataType type = checkExpression(throwNode->expr.get());
+        TypeInfo type_info = checkExpression(throwNode->expr.get());
+        DataType type = type_info.type;
         if (type != DataType::STRING && type != DataType::UNKNOWN && type != DataType::POINTER) {
             throw std::runtime_error("Semantic Error: Can only throw string or struct types.");
         }
@@ -696,7 +901,7 @@ void SemanticAnalyzer::checkRoutine(RoutineNode* routine) {
             pointer_var_table[param.name] = param.type;
             std::string base = param.type;
             
-            if (base.find("ptr<") == 0) {
+            if (base.find("ptr<") == 0 || base.find("managed<") == 0) {
                 size_t p1 = base.find("<");
                 size_t p2 = base.rfind(">");
                 if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
@@ -850,7 +1055,79 @@ void SemanticAnalyzer::analyze(ProgramNode* ast) {
     if (!is_lsp_mode) std::cout << "[ALU CXX] Running Semantic Analysis..." << std::endl;
     current_ast = ast;
     checkProgram(ast);
+    analyzeOwnership();
     if (!is_lsp_mode) std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
+}
+
+bool SemanticAnalyzer::detectCycle(const std::string& current, std::unordered_set<std::string>& visited, std::unordered_set<std::string>& recStack, std::vector<std::string>& path, std::unordered_map<std::string, std::vector<std::string>>& adj) {
+    if (recStack.find(current) != recStack.end()) {
+        path.push_back(current);
+        return true;
+    }
+    if (visited.find(current) != visited.end()) {
+        return false;
+    }
+    
+    visited.insert(current);
+    recStack.insert(current);
+    path.push_back(current);
+    
+    for (const auto& neighbor : adj[current]) {
+        if (detectCycle(neighbor, visited, recStack, path, adj)) {
+            return true;
+        }
+    }
+    
+    path.pop_back();
+    recStack.erase(current);
+    return false;
+}
+
+void SemanticAnalyzer::analyzeOwnership() {
+    std::unordered_map<std::string, std::vector<std::string>> adj;
+    
+    for (const auto& kv : struct_table) {
+        const std::string& structName = kv.first;
+        for (const auto& field : kv.second.fields) {
+            std::string type = field.type;
+            if (type.find("managed<") == 0) {
+                size_t p1 = type.find("<");
+                size_t p2 = type.rfind(">");
+                if (p1 != std::string::npos && p2 != std::string::npos && p2 > p1) {
+                    std::string innerType = type.substr(p1 + 1, p2 - p1 - 1);
+                    // clean up whitespace
+                    while (!innerType.empty() && innerType.back() == ' ') innerType.pop_back();
+                    while (!innerType.empty() && innerType.front() == ' ') innerType.erase(0, 1);
+                    
+                    if (struct_table.find(innerType) != struct_table.end() || struct_templates.find(innerType) != struct_templates.end()) {
+                        adj[structName].push_back(innerType);
+                    }
+                }
+            }
+        }
+    }
+    
+    std::unordered_set<std::string> visited;
+    std::unordered_set<std::string> recStack;
+    std::vector<std::string> path;
+    
+    for (const auto& kv : struct_table) {
+        if (visited.find(kv.first) == visited.end()) {
+            if (detectCycle(kv.first, visited, recStack, path, adj)) {
+                std::string cycleStr = "";
+                bool inCycle = false;
+                std::string startNode = path.back();
+                for (size_t i = 0; i < path.size() - 1; ++i) {
+                    if (path[i] == startNode) inCycle = true;
+                    if (inCycle) {
+                        cycleStr += path[i] + " -> ";
+                    }
+                }
+                cycleStr += startNode;
+                throw std::runtime_error("Ownership Error: Cyclical reference detected: " + cycleStr + ". Cyclical references prevent ARC deallocation and cause memory leaks. Use weak references or redesign your data layout.");
+            }
+        }
+    }
 }
 
 void SemanticAnalyzer::instantiateRoutineTemplateIfNeeded(const std::string& name, const std::vector<std::string>& type_args) {

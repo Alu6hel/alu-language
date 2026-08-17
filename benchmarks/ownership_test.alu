@@ -1,0 +1,15 @@
+struct A {
+    managed<B> b_ref;
+}
+
+struct B {
+    managed<A> a_ref;
+}
+
+routine main() -> int {
+    managed<A> a = new A;
+    managed<B> b = new B;
+    a.b_ref = b;
+    b.a_ref = a;
+    return 0;
+}

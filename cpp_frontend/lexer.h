@@ -35,6 +35,10 @@ enum class TokenType {
     TOK_FLOAT_TYPE,
     TOK_DOUBLE_TYPE,
     TOK_BYTE_TYPE,
+    TOK_FLOAT4_TYPE,
+    TOK_FLOAT8_TYPE,
+    TOK_INT4_TYPE,
+    TOK_INT8_TYPE,
     TOK_LPAREN,
     TOK_RPAREN,
     TOK_LBRACE,
@@ -110,6 +114,10 @@ inline std::string TokenTypeToString(TokenType type) {
         case TokenType::TOK_FLOAT_TYPE: return "'float'";
         case TokenType::TOK_DOUBLE_TYPE: return "'double'";
         case TokenType::TOK_BYTE_TYPE: return "'byte'";
+        case TokenType::TOK_FLOAT4_TYPE: return "'float4'";
+        case TokenType::TOK_FLOAT8_TYPE: return "'float8'";
+        case TokenType::TOK_INT4_TYPE: return "'int4'";
+        case TokenType::TOK_INT8_TYPE: return "'int8'";
         case TokenType::TOK_LPAREN: return "'('";
         case TokenType::TOK_RPAREN: return "')'";
         case TokenType::TOK_LBRACE: return "'{'";

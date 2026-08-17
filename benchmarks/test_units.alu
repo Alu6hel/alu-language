@@ -1,0 +1,1 @@
+export routine main() -> int { float<kg*m/s^2> x = 1.0; return 0; }

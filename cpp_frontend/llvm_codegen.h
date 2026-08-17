@@ -10,6 +10,8 @@
 class LLVMCodeGen {
 private:
     std::stringstream ir_output;
+    std::stringstream* current_output = &ir_output;
+    std::vector<std::string> allocas;
     bool block_terminated = false;
     std::stringstream global_strings_output;
     int tmp_counter;
@@ -18,6 +20,7 @@ private:
     
     // Scope stacks for variable type tracking
     std::vector<std::map<std::string, std::string>> var_type_stack;   // varName -> LLVM Type
+    std::vector<std::map<std::string, std::string>> alu_type_stack;   // varName -> Alu Type
     std::vector<std::map<std::string, std::string>> struct_type_stack; // varName -> Struct Name
     
     // Exception handling state
@@ -73,8 +76,10 @@ public:
     void emitScopeReleases(int levels = -1);
     void emitExceptionUnwind();
     std::string lookupVarType(const std::string& name);
+    std::string lookupAluType(const std::string& name);
     std::string lookupStructType(const std::string& name);
     void declareVarType(const std::string& name, const std::string& llvmType);
+    void declareAluType(const std::string& name, const std::string& aluType);
     void declareStructType(const std::string& name, const std::string& structName);
     
     // Name mangling for LLVM IR unique names
@@ -92,6 +97,7 @@ public:
     void visit(UnsafeBlockNode* node);
     std::string visit(LiteralNode* node); // returns the LLVM value representation (e.g., "5")
     std::string visit(BinOpNode* node);   // returns the register where the result is stored
+    std::string visit(VectorInitNode* node);
     void visit(VarDeclNode* node);
     void visit(VarAssignNode* node);
     void visit(IfNode* node);
@@ -136,5 +142,6 @@ public:
     
     // Direct string emission
     void emit(const std::string& code, ASTNode* node = nullptr);
+    void emitAlloca(const std::string& code);
 };
 

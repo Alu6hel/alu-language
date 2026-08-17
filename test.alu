@@ -1,0 +1,1 @@
+routine main() -> int { int n = vec_len<int>(parts); return 0; }

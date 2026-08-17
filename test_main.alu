@@ -1,5 +1,17 @@
-import "testpkg";
+import "test_math.alu";
+import std::io;
 
 routine main() -> int {
-    return helper();
+    int a = 5;
+    int b = 10;
+    int sum = add_integers(a, b);
+    
+    double base = 2.0;
+    double exp = 8.0;
+    double p = custom_pow(base, exp);
+    
+    printf("Sum: %d\n", sum);
+    printf("Pow: %f\n", p);
+    
+    return 0;
 }

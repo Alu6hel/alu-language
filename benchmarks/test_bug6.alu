@@ -1,0 +1,4 @@
+routine main() -> int {
+    int n = 40;
+    return fib(n-1);
+}

@@ -1,0 +1,34 @@
+struct Matrix {
+    int rows;
+    int cols;
+}
+
+@requires(A.cols == B.rows)
+routine mul(Matrix A, Matrix B) -> Matrix {
+    Matrix res;
+    res.rows = A.rows;
+    res.cols = B.cols;
+    return res;
+}
+
+routine main() -> int {
+    Matrix M1;
+    M1.rows = 4;
+    M1.cols = 2;
+
+    Matrix M2;
+    M2.rows = 2;
+    M2.cols = 3;
+
+    // This should pass Z3 verification since 2 == 2
+    Matrix M3 = mul(M1, M2);
+
+    Matrix M4;
+    M4.rows = 5;
+    M4.cols = 5;
+
+    // This should fail Z3 verification! 2 != 5
+    Matrix M5 = mul(M1, M4);
+
+    return 0;
+}

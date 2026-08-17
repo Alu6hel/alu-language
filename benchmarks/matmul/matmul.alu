@@ -1,0 +1,54 @@
+import std::io;
+
+extern routine malloc(int size) -> ptr<float>;
+
+routine matmul(int n, ptr<float> a, ptr<float> b, ptr<float> c) {
+    int i = 0;
+    while (i < n) {
+        int j = 0;
+        while (j < n) {
+            float sum = 0.0;
+            int k = 0;
+            while (k < n) {
+                // c[i][j] = sum(a[i][k] * b[k][j])
+                // flattened: index = row * n + col
+                int a_idx = (i * n) + k;
+                int b_idx = (k * n) + j;
+                sum = sum + (a[a_idx] * b[b_idx]);
+                k = k + 1;
+            }
+            int c_idx = (i * n) + j;
+            c[c_idx] = sum;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+routine main() -> int {
+    int n = 512;
+    int size = n * n * 4; // 4 bytes per float
+    
+    ptr<float> a = malloc(size);
+    ptr<float> b = malloc(size);
+    ptr<float> c = malloc(size);
+    
+    // Initialize
+    int i = 0;
+    while (i < n * n) {
+        a[i] = 1.0;
+        b[i] = 2.0;
+        i = i + 1;
+    }
+    
+    matmul(n, a, b, c);
+    
+    // Print a sample to prevent dead code elimination
+    printf("Matmul result[0] = %f\n", c[0]);
+    unsafe {
+        free(a);
+        free(b);
+        free(c);
+    }
+    return 0;
+}

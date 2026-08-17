@@ -1,0 +1,6 @@
+export routine main() -> int {
+    float<m> length = 5.0;
+    float<s> time = 2.0;
+    float<m> distance = length + time; // ERROR: Can't add m and s
+    return 0;
+}

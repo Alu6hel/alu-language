@@ -1,0 +1,9 @@
+routine main() -> int {
+    // Should compile successfully (5 > 0)
+    int { x | x > 0 } positive_num = 5;
+    
+    // Should fail compilation in Z3 Verifier (-2 > 0 is FALSE)
+    int { y | y > 0 } invalid_num = 0 - 2;
+
+    return 0;
+}

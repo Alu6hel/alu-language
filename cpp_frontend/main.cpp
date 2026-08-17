@@ -30,6 +30,7 @@ int main(int argc, char* argv[]) {
     std::string jniPackage = "com.example.alu";
     std::string stdPath = ""; // Will be auto-detected if not set
     bool emit_debug_info = false;
+    std::string opt_level = "-O3"; // Default optimization
     
     auto hasExtension = [](const std::string& path, const std::string& ext) {
         if (path.length() >= ext.length()) {
@@ -50,6 +51,8 @@ int main(int argc, char* argv[]) {
             jniPackage = argv[++i];
         } else if (arg == "--std-path" && i + 1 < argc) {
             stdPath = argv[++i];
+        } else if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3" || arg == "-Os" || arg == "-Oz") {
+            opt_level = arg;
         } else if (arg == "-g" || arg == "--debug") {
             emit_debug_info = true;
         } else if (i == 1 && (arg == "install" || arg == "build" || arg == "bindgen")) {
@@ -82,7 +85,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Resolve target aliases
-    if (targetTriple == "wasm32") targetTriple = "wasm32-unknown-emscripten";
+    if (targetTriple == "wasm32") targetTriple = "wasm32-unknown-unknown";
     else if (targetTriple == "arm64" || targetTriple == "aarch64") targetTriple = "aarch64-unknown-linux-gnu";
     else if (targetTriple == "android") targetTriple = "aarch64-linux-android";
     else if (targetTriple == "ios") targetTriple = "aarch64-apple-ios";
@@ -353,7 +356,7 @@ int main(int argc, char* argv[]) {
         std::string outBinFilename = baseFilename;
         
         if (targetAndroid) outBinFilename += ".so";
-        else if (targetWasm) outBinFilename += ".js";
+        else if (targetWasm) outBinFilename += ".wasm";
         else if (targetVulkan) outBinFilename += ".spv";
         else if (targetMetal) outBinFilename += ".metallib";
         else if (targetIos || targetIosSim) outBinFilename += "-" + targetTriple + ".a";
@@ -361,7 +364,8 @@ int main(int argc, char* argv[]) {
         
         std::string compileCommand;
         if (targetWasm) {
-            compileCommand = "emcc -O3 -s WASM=1 -s EXPORTED_FUNCTIONS=\"['_process_image', '_apply_filter']\" -o " + outBinFilename + " " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp";
+            std::string clangWasmPath = "\"C:\\Program Files\\LLVM\\bin\\clang.exe\"";
+            compileCommand = clangWasmPath + " --target=wasm32-unknown-unknown -O3 -nostdlib -Wl,--no-entry -Wl,--export-all -o " + outBinFilename + " " + outFilename;
         } else if (targetAndroid) {
             std::string resolvedNdk = ndkPath;
             if (resolvedNdk.empty()) {
@@ -383,13 +387,23 @@ int main(int argc, char* argv[]) {
             compileCommand = "xcrun -sdk macosx metal -c " + outFilename + " -o " + baseFilename + ".air && xcrun -sdk macosx metallib " + baseFilename + ".air -o " + outBinFilename;
         } else if (targetIos) {
             std::string objFile = baseFilename + "-arm64.o";
+#ifdef _WIN32
+            compileCommand = "clang -x ir " + outFilename + " -c -O3 -target aarch64-apple-ios -o " + objFile;
+            outBinFilename = objFile;
+#else
             compileCommand = "clang -x ir " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+#endif
         } else if (targetIosSim) {
             std::string arch = (targetTriple == "aarch64-apple-ios-simulator") ? "arm64" : "x86_64";
             std::string objFile = baseFilename + "-" + arch + "-sim.o";
+#ifdef _WIN32
+            compileCommand = "clang -x ir " + outFilename + " -c -O3 -target " + targetTriple + " -o " + objFile;
+            outBinFilename = objFile;
+#else
             compileCommand = "clang -x ir " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+#endif
         } else {
-            std::string opt_flag = emit_debug_info ? "-O0 -g" : "-O3";
+            std::string opt_flag = emit_debug_info ? "-O0 -g" : opt_level;
             compileCommand = "clang++ " + opt_flag + " -o " + outBinFilename + " " + outFilename + " \"" + stdPath + "/std/fs_backend.cpp\" \"" + stdPath + "/std/net_backend.cpp\" \"" + stdPath + "/std/crypto_backend.cpp\" \"" + stdPath + "/std/string_backend.cpp\" \"" + stdPath + "/std/image_backend.cpp\" \"" + stdPath + "/std/thread_backend.cpp\" -lws2_32";
             for (size_t i = 1; i < inputFiles.size(); ++i) {
                 compileCommand += " \"" + inputFiles[i] + "\"";
