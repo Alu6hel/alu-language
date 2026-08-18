@@ -1,0 +1,11 @@
+# ALU build artifacts
+*.ll
+*.o
+*.obj
+*.exe
+*.so
+*.dylib
+*.xcframework/
+
+# Dependencies
+alu_modules/

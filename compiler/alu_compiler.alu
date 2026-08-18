@@ -2,28 +2,39 @@
 // Central Pipeline (The Independence Day)
 
 import compiler::lexer;
+
+extern routine alu_alloc(int bytes) -> ptr<byte>;
+routine alloc(int bytes) -> ptr<byte> { return alu_alloc(bytes); }
+
+extern routine alu_print(string msg);
+routine print(string msg) { alu_print(msg); }
+
+routine print_str_3(string m1, string m2, string m3) { alu_print(m1); alu_print(m2); alu_print(m3); }
+
+extern routine alu_str_eq(string a, string b) -> int;
+routine str_eq(string a, string b) -> int { return alu_str_eq(a, b); }
 import compiler::ast;
 import compiler::semantic_analyzer;
 import compiler::verifier;
 import compiler::emitter;
 
-extern routine alloc(int bytes) -> ptr<byte>;
-extern routine print(string msg);
-extern routine print_str_3(string m1, string m2, string m3);
-extern routine size(ptr<string> args) -> int;
 
-@requires("size(args) > 1")
-@ensures("source_code != null")
-routine main(ptr<string> args) -> int {
+
+
+extern routine size(ptr<string> args) -> int;
+extern routine fs_read_to_string_c(string path) -> string;
+extern routine strlen(string s) -> int;
+
+routine main() -> int {
     print("[ALU Factory] Initializing Pure ALU Compiler 1.0...");
     
     // Z3 Proves this 2MB allocation fits inside system limits without overflow
-    ptr<byte> source_code = alloc(2048);
-    // read_file(args[1], source_code)
+    string source_code = fs_read_to_string_c("leak_test.alu");
+    int src_len = strlen(source_code);
     
     // 1. Lex
     print("[ALU Lexer] Scanning tokens...");
-    ptr<byte> tokens = tokenize_source(source_code, 2048);
+    ptr<Token> tokens = tokenize_source(source_code, src_len);
     
     // 2. Parse
     print("[ALU Parser] Constructing AST...");

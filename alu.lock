@@ -1,0 +1,10 @@
+{
+  "packages": {
+    "std": {
+      "commit": "f7b3981c7d5944622cb570a7017063b39f076b62",
+      "source": "file:///C:/Users/Alu/source/repos/Alu6hel/alu-std",
+      "version": "*"
+    }
+  },
+  "version": 1
+}

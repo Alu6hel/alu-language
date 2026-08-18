@@ -1,0 +1,1 @@
+struct Node { ptr<Node> next; } routine main() -> int { ptr<Node> n = new Node; n.next = new Node; return 0; }

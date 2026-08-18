@@ -1,0 +1,6 @@
+routine main() -> int {
+    int x = "hello"; // Type mismatch
+    string y = 5; // Type mismatch
+    z = 10; // Undefined variable
+    return 0;
+}

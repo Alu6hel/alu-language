@@ -140,13 +140,150 @@ int BuildDriver::build(const std::string& targetTriple, bool debug) {
     if (result == 0) {
         // Compute output path
         std::string entryFile = manifest.entry.empty() ? "src/main.alu" : manifest.entry;
-        // The compiler generates the output adjacent to the source file
-#ifdef _WIN32
-        outputPath = (fs::path(projectDir) / entryFile).replace_extension(".exe").string();
+        
+        if (targetTriple.find("android") != std::string::npos) {
+            std::cout << "[ALUPM] Generating Android APK..." << std::endl;
+            std::string soPath = (fs::path(projectDir) / entryFile).replace_extension(".so").string();
+            std::string safeName = manifest.name;
+            std::replace(safeName.begin(), safeName.end(), '-', '_');
+            std::string pkgName = "com.alu." + safeName;
+            
+            // 1. Find SDK
+            std::string sdkPath;
+            const char* envSdk = std::getenv("ANDROID_HOME");
+            if (!envSdk) envSdk = std::getenv("ANDROID_SDK_ROOT");
+            if (envSdk) {
+                sdkPath = envSdk;
+            } else {
+#if defined(_WIN32)
+                const char* localAppdata = std::getenv("LOCALAPPDATA");
+                if (localAppdata) sdkPath = std::string(localAppdata) + "\\Android\\Sdk";
+#elif defined(__APPLE__)
+                const char* home = std::getenv("HOME");
+                if (home) sdkPath = std::string(home) + "/Library/Android/sdk";
 #else
-        outputPath = (fs::path(projectDir) / entryFile).replace_extension("").string();
+                const char* home = std::getenv("HOME");
+                if (home) sdkPath = std::string(home) + "/Android/Sdk";
 #endif
-        std::cout << "[ALUPM] Build successful!" << std::endl;
+            }
+            
+            // 2. Find latest build-tools and android.jar
+            std::string buildToolsPath = "";
+            if (fs::exists(sdkPath + "/build-tools")) {
+                for (const auto& entry : fs::directory_iterator(sdkPath + "/build-tools")) {
+                    if (entry.is_directory()) {
+                        buildToolsPath = entry.path().string(); // Just grab the last one
+                    }
+                }
+            }
+            std::string androidJar = "";
+            if (fs::exists(sdkPath + "/platforms")) {
+                for (const auto& entry : fs::directory_iterator(sdkPath + "/platforms")) {
+                    if (entry.is_directory() && fs::exists(entry.path() / "android.jar")) {
+                        androidJar = (entry.path() / "android.jar").string();
+                    }
+                }
+            }
+            
+            if (buildToolsPath.empty() || androidJar.empty()) {
+                std::cerr << "[ALUPM] Error: Could not find Android SDK build-tools or android.jar at " << sdkPath << std::endl;
+                return 1;
+            }
+            
+            // Generate AndroidManifest.xml
+            std::string manifestXml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+            manifestXml += "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"" + pkgName + "\" android:versionCode=\"1\" android:versionName=\"1.0\">\n";
+            manifestXml += "    <application android:label=\"" + manifest.name + "\" android:hasCode=\"false\">\n";
+            manifestXml += "        <activity android:name=\"android.app.NativeActivity\" android:label=\"" + manifest.name + "\" android:configChanges=\"orientation|keyboardHidden\" android:exported=\"true\">\n";
+            std::string libName = fs::path(entryFile).filename().replace_extension("").string();
+            manifestXml += "            <meta-data android:name=\"android.app.lib_name\" android:value=\"" + libName + "\" />\n";
+            manifestXml += "            <intent-filter>\n";
+            manifestXml += "                <action android:name=\"android.intent.action.MAIN\" />\n";
+            manifestXml += "                <category android:name=\"android.intent.category.LAUNCHER\" />\n";
+            manifestXml += "            </intent-filter>\n";
+            manifestXml += "        </activity>\n";
+            manifestXml += "    </application>\n";
+            manifestXml += "</manifest>\n";
+            
+            std::string manifestPath = (fs::path(projectDir) / "AndroidManifest.xml").string();
+            std::ofstream mOut(manifestPath);
+            mOut << manifestXml;
+            mOut.close();
+            
+            std::string unalignedApk = (fs::path(projectDir) / "app.unaligned.apk").string();
+            std::string alignedApk = (fs::path(projectDir) / "app.aligned.apk").string();
+            std::string finalApk = (fs::path(projectDir) / (manifest.name + ".apk")).string();
+            
+#ifdef _WIN32
+            std::string sep = "\\";
+            std::string aaptCmd = "\"\"" + buildToolsPath + sep + "aapt.exe\" package -f -M \"" + manifestPath + "\" -I \"" + androidJar + "\" -F \"" + unalignedApk + "\"\"";
+#else
+            std::string sep = "/";
+            std::string aaptCmd = "\"" + buildToolsPath + sep + "aapt\" package -f -M \"" + manifestPath + "\" -I \"" + androidJar + "\" -F \"" + unalignedApk + "\"";
+#endif
+            std::cout << "[ALUPM] Running aapt..." << std::endl;
+            if (std::system(aaptCmd.c_str()) != 0) return 1;
+            
+            // Add lib
+            std::string libDir = (fs::path(projectDir) / "lib" / "arm64-v8a").string();
+            fs::create_directories(libDir);
+            std::string targetSo = (fs::path(libDir) / ("lib" + libName + ".so")).string();
+            if (fs::exists(targetSo)) fs::remove(targetSo);
+            fs::copy_file(soPath, targetSo);
+            
+            std::string cwdBak = fs::current_path().string();
+            fs::current_path(projectDir);
+#ifdef _WIN32
+            std::string addCmd = "\"\"" + buildToolsPath + sep + "aapt.exe\" add \"" + unalignedApk + "\" lib/arm64-v8a/lib" + libName + ".so\"";
+#else
+            std::string addCmd = "\"" + buildToolsPath + sep + "aapt\" add \"" + unalignedApk + "\" lib/arm64-v8a/lib" + libName + ".so";
+#endif
+            std::cout << "[ALUPM] Adding native library..." << std::endl;
+            if (std::system(addCmd.c_str()) != 0) { fs::current_path(cwdBak); return 1; }
+            fs::current_path(cwdBak);
+            
+            // Zipalign
+#ifdef _WIN32
+            std::string zipalignCmd = "\"\"" + buildToolsPath + sep + "zipalign.exe\" -f -p 4 \"" + unalignedApk + "\" \"" + alignedApk + "\"\"";
+#else
+            std::string zipalignCmd = "\"" + buildToolsPath + sep + "zipalign\" -f -p 4 \"" + unalignedApk + "\" \"" + alignedApk + "\"";
+#endif
+            std::cout << "[ALUPM] Running zipalign..." << std::endl;
+            if (std::system(zipalignCmd.c_str()) != 0) return 1;
+            
+            // Sign
+            std::string keystore = (fs::path(projectDir) / "debug.keystore").string();
+            if (!fs::exists(keystore)) {
+                std::cout << "[ALUPM] Generating debug keystore..." << std::endl;
+                std::string keygenCmd = "keytool -genkeypair -keystore \"" + keystore + "\" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname \"CN=Android Debug,O=Android,C=US\"";
+                std::system(keygenCmd.c_str());
+            }
+            
+#ifdef _WIN32
+            std::string signCmd = "\"\"" + buildToolsPath + sep + "apksigner.bat\" sign --ks \"" + keystore + "\" --ks-pass pass:android \"" + alignedApk + "\"\"";
+#else
+            std::string signCmd = "\"" + buildToolsPath + sep + "apksigner\" sign --ks \"" + keystore + "\" --ks-pass pass:android \"" + alignedApk + "\"";
+#endif
+            std::cout << "[ALUPM] Running apksigner..." << std::endl;
+            if (std::system(signCmd.c_str()) != 0) return 1;
+            
+            if (fs::exists(finalApk)) fs::remove(finalApk);
+            fs::rename(alignedApk, finalApk);
+            fs::remove(unalignedApk);
+            fs::remove(manifestPath);
+            fs::remove_all(fs::path(projectDir) / "lib");
+            
+            outputPath = finalApk;
+            std::cout << "[ALUPM] Build successful! APK: " << finalApk << std::endl;
+        } else {
+            // The compiler generates the output adjacent to the source file
+#ifdef _WIN32
+            outputPath = (fs::path(projectDir) / entryFile).replace_extension(".exe").string();
+#else
+            outputPath = (fs::path(projectDir) / entryFile).replace_extension("").string();
+#endif
+            std::cout << "[ALUPM] Build successful!" << std::endl;
+        }
     } else {
         std::cerr << "[ALUPM] Build failed with exit code " << result << std::endl;
     }

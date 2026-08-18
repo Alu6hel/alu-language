@@ -6,6 +6,10 @@
 
 // --- Unit Management ---
 
+void SemanticAnalyzer::reportError(const std::string& msg, int line, int col, const std::string& file) {
+    errors.push_back({msg, file, line, col});
+}
+
 std::map<std::string, int> parseUnit(const std::string& unitStr) {
     std::map<std::string, int> units;
     if (unitStr.empty()) return units;
@@ -204,7 +208,8 @@ void SemanticAnalyzer::instantiateTemplateIfNeeded(const std::string& typeStr) {
     args.push_back(args_str.substr(last));
     
     if (args.size() != tmpl->type_params.size()) {
-        throw std::runtime_error("Template arg count mismatch for " + typeStr);
+        reportError("Template arg count mismatch for " + typeStr);
+        return;
     }
     
     std::map<std::string, std::string> type_map;
@@ -292,7 +297,8 @@ TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
             // It's a variable reference
             SymbolMeta meta;
             if (!lookupSymbolMeta(literal->value, meta)) {
-                throw std::runtime_error("Semantic Error: Undefined variable '" + literal->value + "'");
+                reportError("Semantic Error: Undefined variable '" + literal->value + "'", literal->line, literal->col, literal->file);
+                return {DataType::UNKNOWN, ""};
             }
             return {meta.type, meta.unit};
         }
@@ -309,13 +315,15 @@ TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
         else if (targetDT == DataType::INT8) { expected_args = 8; expected_base = DataType::INT; }
         
         if (vecInit->elements.size() != expected_args) {
-            throw std::runtime_error("Semantic Error: SIMD Vector " + vecInit->typeName + " requires exactly " + std::to_string(expected_args) + " arguments.");
+            reportError("Semantic Error: SIMD Vector " + vecInit->typeName + " requires exactly " + std::to_string(expected_args) + " arguments.", vecInit->line, vecInit->col, vecInit->file);
+            return {DataType::UNKNOWN, ""};
         }
         
         for (const auto& el : vecInit->elements) {
             TypeInfo elType = checkExpression(el.get());
             if (elType.type != expected_base) {
-                throw std::runtime_error("Semantic Error: SIMD Vector " + vecInit->typeName + " elements must be of base type " + DataTypeToString(expected_base) + ".");
+                reportError("Semantic Error: SIMD Vector " + vecInit->typeName + " elements must be of base type " + DataTypeToString(expected_base) + ".", vecInit->line, vecInit->col, vecInit->file);
+                return {DataType::UNKNOWN, ""};
             }
         }
         return {targetDT, ""};
@@ -336,7 +344,8 @@ TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
         if (function_table.find(funcCall->name) == function_table.end()) {
             // Built-in puts fallback if standard library is missing
             if (funcCall->name != "puts" && funcCall->name != "printf") {
-                throw std::runtime_error("Semantic Error: Undefined function '" + funcCall->name + "'");
+                reportError("Semantic Error: Undefined function '" + funcCall->name + "'", funcCall->line, funcCall->col, funcCall->file);
+                return {DataType::UNKNOWN, ""};
             }
         }
         
@@ -376,7 +385,8 @@ TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
         DataType t = t_info.type;
         if (t != DataType::INT) {
             if (!is_lsp_mode) { std::cerr << "INDEX ERROR ON: Array Index" << std::endl; arrIndex->indexExpr->print(0); }
-            throw std::runtime_error("Semantic Error: Array index must be an integer");
+            reportError("Semantic Error: Array index must be an integer", arrIndex->line, arrIndex->col, arrIndex->file);
+            return {DataType::UNKNOWN, ""};
         }
         
         std::string fullType = "int";
@@ -419,7 +429,8 @@ TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
                 return {DataType::POINTER, ""};
             }
             if (!is_lsp_mode) { std::cerr << "VarAccess Error: " << varNode->name << std::endl; }
-            throw std::runtime_error("Semantic Error: Undefined variable '" + varNode->name + "'");
+            reportError("Semantic Error: Undefined variable '" + varNode->name + "'", varNode->line, varNode->col, varNode->file);
+            return {DataType::UNKNOWN, ""};
         }
         if (is_lsp_mode) {
             SymbolMeta meta;
@@ -450,7 +461,8 @@ TypeInfo SemanticAnalyzer::checkExpression(ASTNode* expr) {
         if (!leftT_info.unit.empty() || !rightT_info.unit.empty()) {
             if (binOp->op == "+" || binOp->op == "-") {
                 if (leftT_info.unit != rightT_info.unit && (!leftT_info.unit.empty() && !rightT_info.unit.empty())) {
-                    throw std::runtime_error("Semantic Error: Unit mismatch in addition/subtraction. <" + leftT_info.unit + "> vs <" + rightT_info.unit + ">");
+                    reportError("Semantic Error: Unit mismatch in addition/subtraction. <" + leftT_info.unit + "> vs <" + rightT_info.unit + ">", binOp->line, binOp->col, binOp->file);
+                    return {DataType::UNKNOWN, ""};
                 }
                 res_unit = leftT_info.unit.empty() ? rightT_info.unit : leftT_info.unit;
             } else if (binOp->op == "*") {
@@ -557,7 +569,8 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
         declareSymbol(decl->refinement_var, expectedType, declared_unit, decl->line, decl->col, decl->file);
         TypeInfo ref_type = checkExpression(decl->refinement_expr.get());
         if (ref_type.type != DataType::BOOL) {
-            throw std::runtime_error("Semantic Error: Refinement expression must evaluate to a boolean");
+            reportError("Semantic Error: Refinement expression must evaluate to a boolean", decl->line, decl->col, decl->file);
+            return;
         }
         popScope();
     }
@@ -601,13 +614,15 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
             // It's a struct/effect that isn't a pointer, but declared locally
             declareStructVar(decl->name, decl->varType);
         } else {
-            throw std::runtime_error("Semantic Error: Unknown variable type '" + decl->varType + "'");
+            reportError("Semantic Error: Unknown variable type '" + decl->varType + "'", decl->line, decl->col, decl->file);
+            return;
         }
     }
     
     // Check if variable is already defined IN THE CURRENT SCOPE ONLY
     if (isDeclaredInCurrentScope(decl->name)) {
-        throw std::runtime_error("Semantic Error: Variable '" + decl->name + "' already declared in this scope.");
+        reportError("Semantic Error: Variable '" + decl->name + "' already declared in this scope.", decl->line, decl->col, decl->file);
+        return;
     }
     
     // Check the expression it is initialized with
@@ -616,7 +631,8 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
         DataType actualType = actualType_info.type;
         std::string actual_unit = actualType_info.unit;
         if (!declared_unit.empty() && !actual_unit.empty() && declared_unit != actual_unit) {
-            throw std::runtime_error("Semantic Error: Unit mismatch in variable declaration '" + decl->name + "'. Expected unit <" + declared_unit + "> but got <" + actual_unit + ">.");
+            reportError("Semantic Error: Unit mismatch in variable declaration '" + decl->name + "'. Expected unit <" + declared_unit + "> but got <" + actual_unit + ">.", decl->line, decl->col, decl->file);
+            return;
         }
         if (expectedType != DataType::UNKNOWN && expectedType != actualType && actualType != DataType::POINTER && actualType != DataType::UNKNOWN) {
             if (!((expectedType == DataType::INT && actualType == DataType::BYTE) || 
@@ -627,7 +643,8 @@ void SemanticAnalyzer::checkVarDecl(VarDeclNode* decl) {
                   (expectedType == DataType::DOUBLE && actualType == DataType::INT) ||
                   (expectedType == DataType::FLOAT && actualType == DataType::DOUBLE) ||
                   (expectedType == DataType::DOUBLE && actualType == DataType::FLOAT))) {
-                throw std::runtime_error("Semantic Error: Type mismatch in variable declaration '" + decl->name + "'. Expected " + DataTypeToString(expectedType) + " but got " + DataTypeToString(actualType));
+                reportError("Semantic Error: Type mismatch in variable declaration '" + decl->name + "'. Expected " + DataTypeToString(expectedType) + " but got " + DataTypeToString(actualType), decl->line, decl->col, decl->file);
+                return;
             }
         }
     }
@@ -645,8 +662,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
     else if (auto varassign = dynamic_cast<VarAssignNode*>(stmt)) {
         DataType targetType;
         if (!lookupSymbol(varassign->name, targetType)) {
-            std::cerr << "[COMPILER ERROR] Semantic Error: Assignment to undefined variable '" << varassign->name << "'" << std::endl;
-            exit(1);
+            reportError("Semantic Error: Assignment to undefined variable '" + varassign->name + "'", varassign->line, varassign->col, varassign->file);
+            return;
         }
         TypeInfo exprType_info = checkExpression(varassign->expr.get());
         DataType exprType = exprType_info.type;
@@ -659,7 +676,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
                   (exprType == DataType::DOUBLE && targetType == DataType::INT) ||
                   (exprType == DataType::FLOAT && targetType == DataType::DOUBLE) ||
                   (exprType == DataType::DOUBLE && targetType == DataType::FLOAT))) {
-                throw std::runtime_error("Semantic Error: Type mismatch in assignment to '" + varassign->name + "'");
+                reportError("Semantic Error: Type mismatch in assignment to '" + varassign->name + "'", varassign->line, varassign->col, varassign->file);
+                return;
             }
         }
     }
@@ -675,18 +693,21 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         
         if (is_vector) {
             if (memberAssign->fieldName != "x" && memberAssign->fieldName != "y" && memberAssign->fieldName != "z" && memberAssign->fieldName != "w") {
-                throw std::runtime_error("Semantic Error: Invalid SIMD component '" + memberAssign->fieldName + "'.");
+                reportError("Semantic Error: Invalid SIMD component '" + memberAssign->fieldName + "'.", memberAssign->line, memberAssign->col, memberAssign->file);
+                return;
             }
             TypeInfo rhs = checkExpression(memberAssign->expr.get());
             if (rhs.type != vec_base) {
-                throw std::runtime_error("Semantic Error: SIMD assignment type mismatch.");
+                reportError("Semantic Error: SIMD assignment type mismatch.", memberAssign->line, memberAssign->col, memberAssign->file);
+                return;
             }
             return;
         }
 
         std::string structName;
         if (!lookupStructVar(memberAssign->objectName, structName)) {
-            throw std::runtime_error("Semantic Error: Variable '" + memberAssign->objectName + "' is not a struct.");
+            reportError("Semantic Error: Variable '" + memberAssign->objectName + "' is not a struct.", memberAssign->line, memberAssign->col, memberAssign->file);
+            return;
         }
         StructInfo& info = struct_table[structName];
         
@@ -700,13 +721,15 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
             }
         }
         if (!found) {
-            throw std::runtime_error("Semantic Error: Struct '" + structName + "' has no field '" + memberAssign->fieldName + "'");
+            reportError("Semantic Error: Struct '" + structName + "' has no field '" + memberAssign->fieldName + "'", memberAssign->line, memberAssign->col, memberAssign->file);
+            return;
         }
         
         TypeInfo valType_info = checkExpression(memberAssign->expr.get());
         DataType valType = valType_info.type;
         if (fieldType != DataType::UNKNOWN && fieldType != valType && valType != DataType::POINTER) {
-            throw std::runtime_error("Semantic Error: Type mismatch in struct member assignment.");
+            reportError("Semantic Error: Type mismatch in struct member assignment.", memberAssign->line, memberAssign->col, memberAssign->file);
+            return;
         }
     }
     else if (auto arrDecl = dynamic_cast<ArrayDeclNode*>(stmt)) {
@@ -717,7 +740,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         TypeInfo sizeType_info = checkExpression(arrDecl->sizeExpr.get());
         DataType sizeType = sizeType_info.type;
         if (sizeType != DataType::INT) {
-            throw std::runtime_error("Semantic Error: Array size must be an integer");
+            reportError("Semantic Error: Array size must be an integer", arrDecl->line, arrDecl->col, arrDecl->file);
+            return;
         }
     }
     else if (auto arrAssign = dynamic_cast<ArrayAssignNode*>(stmt)) {
@@ -733,7 +757,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         DataType idxType = idxType_info.type;
         if (idxType != DataType::INT) {
             if (!is_lsp_mode) { std::cerr << "INDEX ERROR ON (ASSIGN): " << std::endl; arrAssign->indexExpr->print(0); }
-            throw std::runtime_error("Semantic Error: Array index must be an integer");
+            reportError("Semantic Error: Array index must be an integer", arrAssign->line, arrAssign->col, arrAssign->file);
+            return;
         }
         checkExpression(arrAssign->valExpr.get());
     }
@@ -745,14 +770,16 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         TypeInfo t_info = checkExpression(freeNode->expr.get());
         DataType t = t_info.type;
         if (t != DataType::POINTER && t != DataType::UNKNOWN) {
-            throw std::runtime_error("Semantic Error: Cannot free a non-pointer type.");
+            reportError("Semantic Error: Cannot free a non-pointer type.", freeNode->line, freeNode->col, freeNode->file);
+            return;
         }
     }
     else if (auto ifNode = dynamic_cast<IfNode*>(stmt)) {
         TypeInfo condType_info = checkExpression(ifNode->condition.get());
         DataType condType = condType_info.type;
         if (condType != DataType::BOOL) {
-            throw std::runtime_error("Semantic Error: 'if' condition must evaluate to a boolean.");
+            reportError("Semantic Error: 'if' condition must evaluate to a boolean.", ifNode->line, ifNode->col, ifNode->file);
+            return;
         }
         // Scoped then-body
         pushScope();
@@ -769,7 +796,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         TypeInfo condType_info = checkExpression(whileNode->condition.get());
         DataType condType = condType_info.type;
         if (condType != DataType::BOOL) {
-            throw std::runtime_error("Semantic Error: 'while' condition must evaluate to a boolean.");
+            reportError("Semantic Error: 'while' condition must evaluate to a boolean.", whileNode->line, whileNode->col, whileNode->file);
+            return;
         }
         // Scoped body
         pushScope();
@@ -788,7 +816,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
             TypeInfo condType_info = checkExpression(forNode->condition.get());
         DataType condType = condType_info.type;
             if (condType != DataType::BOOL) {
-                throw std::runtime_error("Semantic Error: 'for' condition must evaluate to a boolean.");
+                reportError("Semantic Error: 'for' condition must evaluate to a boolean.", forNode->line, forNode->col, forNode->file);
+                return;
             }
         }
         
@@ -819,9 +848,10 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
               (returnType == DataType::DOUBLE && current_routine_return_type == DataType::FLOAT) ||
               (returnType == DataType::INT && current_routine_return_type == DataType::BYTE) ||
               (returnType == DataType::BYTE && current_routine_return_type == DataType::INT))) {
-            throw std::runtime_error("Semantic Error: Return type mismatch. Expected " + 
+            reportError("Semantic Error: Return type mismatch. Expected " + 
                                      DataTypeToString(current_routine_return_type) + " but got " + 
-                                     DataTypeToString(returnType));
+                                     DataTypeToString(returnType), returnNode->line, returnNode->col, returnNode->file);
+            return;
         }
     }
     else if (auto funcCall = dynamic_cast<FuncCallNode*>(stmt)) {
@@ -839,7 +869,8 @@ void SemanticAnalyzer::checkStatement(ASTNode* stmt) {
         TypeInfo type_info = checkExpression(throwNode->expr.get());
         DataType type = type_info.type;
         if (type != DataType::STRING && type != DataType::UNKNOWN && type != DataType::POINTER) {
-            throw std::runtime_error("Semantic Error: Can only throw string or struct types.");
+            reportError("Semantic Error: Can only throw string or struct types.", throwNode->line, throwNode->col, throwNode->file);
+            return;
         }
     }
     else if (auto tryNode = dynamic_cast<TryCatchNode*>(stmt)) {
@@ -1056,7 +1087,7 @@ void SemanticAnalyzer::analyze(ProgramNode* ast) {
     current_ast = ast;
     checkProgram(ast);
     analyzeOwnership();
-    if (!is_lsp_mode) std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
+    if (!is_lsp_mode && errors.empty()) std::cout << "[ALU CXX] Semantic Analysis Passed: Memory and Type Safety verified." << std::endl;
 }
 
 bool SemanticAnalyzer::detectCycle(const std::string& current, std::unordered_set<std::string>& visited, std::unordered_set<std::string>& recStack, std::vector<std::string>& path, std::unordered_map<std::string, std::vector<std::string>>& adj) {
@@ -1136,7 +1167,8 @@ void SemanticAnalyzer::analyzeOwnership() {
                     }
                 }
                 cycleStr += startNode;
-                throw std::runtime_error("Ownership Error: Cyclical reference detected: " + cycleStr + ". Cyclical references prevent ARC deallocation and cause memory leaks. Use weak references or redesign your data layout.");
+                reportError("Ownership Error: Cyclical reference detected: " + cycleStr + ". Cyclical references prevent ARC deallocation and cause memory leaks. Use weak references or redesign your data layout.");
+                return;
             }
         }
     }

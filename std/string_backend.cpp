@@ -76,3 +76,21 @@ extern "C" char* alu_regex_replace(const char* s, const char* pattern, const cha
         return res;
     }
 }
+
+extern "C" int read_char_c(const char* s, int idx) {
+    if (!s) return 0;
+    return s[idx];
+}
+
+#include <iostream>
+
+extern "C" void alu_print(const char* msg) {
+    if (msg) {
+        std::cout << msg << std::endl;
+    }
+}
+
+extern "C" int alu_str_eq(const char* a, const char* b) {
+    if (!a || !b) return 0;
+    return strcmp(a, b) == 0 ? 1 : 0;
+}

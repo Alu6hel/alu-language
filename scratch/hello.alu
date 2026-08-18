@@ -1,0 +1,5 @@
+extern routine printf(string fmt) -> int;
+routine main() -> int {
+    printf("Hello\n");
+    return 0;
+}

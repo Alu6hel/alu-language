@@ -34,7 +34,7 @@ private:
     std::map<std::string, int> struct_field_indices; // map StructName.fieldName -> index
     std::map<std::string, std::string> func_return_types; // map funcName -> LLVM Type
     std::map<std::string, std::string> func_signatures; // map funcName -> signature string (if varargs)
-    std::set<std::string> extern_functions; // track functions that are external C routines (no ARC)
+    std::set<std::string> extern_functions; std::set<std::string> opaque_types; // track functions that are external C routines (no ARC)
     std::string current_func_ret_type; // track return type of current routine
     std::string current_namespace;     // track current namespace for name mangling
     std::string target_arch; // Target architecture string

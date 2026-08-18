@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__ANDROID__)
 // Windows Mock implementation since OpenSSL is missing
 extern "C" {
     char* malloc_c(int size) {

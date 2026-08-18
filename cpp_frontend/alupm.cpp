@@ -96,12 +96,18 @@ static void printUsage() {
 
 // ─── Init Command ────────────────────────────────────────────────────────────
 
-static int cmdInit(const std::string& name) {
+static int cmdInit(const std::string& name, const std::string& tmpl) {
     std::string projectName = name.empty() ? "alu_project" : name;
 
     if (fs::exists("alu.toml")) {
         std::cerr << COLOR_RED << "[ALUPM] Error: alu.toml already exists in this directory." << COLOR_RESET << std::endl;
         return 1;
+    }
+
+    // Determine entry point and dependencies based on template
+    std::string entryPoint = "src/main.alu";
+    if (tmpl == "android-app" || tmpl == "ios-app") {
+        entryPoint = "src/App.alu";
     }
 
     // Create alu.toml
@@ -111,7 +117,7 @@ static int cmdInit(const std::string& name) {
     pkg.tableVal["version"] = TomlValue::String("0.1.0");
     pkg.tableVal["description"] = TomlValue::String("An ALU project");
     pkg.tableVal["license"] = TomlValue::String("MIT");
-    pkg.tableVal["entry"] = TomlValue::String("src/main.alu");
+    pkg.tableVal["entry"] = TomlValue::String(entryPoint);
     auto authors = TomlValue::Array();
     authors.arrayVal.push_back(TomlValue::String("Your Name"));
     pkg.tableVal["authors"] = authors;
@@ -122,19 +128,56 @@ static int cmdInit(const std::string& name) {
 
     TomlParser::writeFile("alu.toml", doc);
 
-    // Create src/main.alu
+    // Create src/
     fs::create_directory("src");
-    std::ofstream mainFile("src/main.alu");
-    mainFile << "// " << projectName << " — an ALU project" << std::endl;
-    mainFile << "// Created by alupm" << std::endl;
-    mainFile << std::endl;
-    mainFile << "import std::io;" << std::endl;
-    mainFile << std::endl;
-    mainFile << "routine main() -> int {" << std::endl;
-    mainFile << "    print(\"Hello from " << projectName << "!\");" << std::endl;
-    mainFile << "    return 0;" << std::endl;
-    mainFile << "}" << std::endl;
-    mainFile.close();
+    
+    if (tmpl == "android-app" || tmpl == "ios-app") {
+        std::ofstream appFile(entryPoint);
+        appFile << "// " << projectName << " — an ALU " << tmpl << std::endl;
+        appFile << "// Scaffolded by alupm" << std::endl;
+        appFile << std::endl;
+        if (tmpl == "android-app") {
+            appFile << "import \"std/os/android/ui.alu\";" << std::endl;
+        } else {
+            appFile << "import \"std/os/ios/ui.alu\";" << std::endl;
+        }
+        appFile << std::endl;
+        appFile << "export routine main() -> int {" << std::endl;
+        appFile << "    int w = alu_os_get_screen_width();" << std::endl;
+        appFile << "    alu_os_show_toast(\"Welcome to " << projectName << "!\");" << std::endl;
+        appFile << "    return w;" << std::endl;
+        appFile << "}" << std::endl;
+        appFile.close();
+        
+        if (tmpl == "android-app") {
+            std::ofstream scriptFile("build_android.bat");
+            scriptFile << "@echo off" << std::endl;
+            scriptFile << "echo Building " << projectName << " for Android..." << std::endl;
+            scriptFile << "alu build " << entryPoint << " --target=android" << std::endl;
+            scriptFile.close();
+            std::cout << COLOR_GREEN << "[ALUPM] " << COLOR_RESET << "Created build_android.bat" << std::endl;
+        } else {
+            std::ofstream scriptFile("build_ios.sh");
+            scriptFile << "#!/bin/bash" << std::endl;
+            scriptFile << "echo \"Building " << projectName << " for iOS...\"" << std::endl;
+            scriptFile << "alu build " << entryPoint << " --create-xcframework" << std::endl;
+            scriptFile.close();
+            // Make executable on unix systems if possible, but standard ofstream creation won't set +x
+            std::cout << COLOR_GREEN << "[ALUPM] " << COLOR_RESET << "Created build_ios.sh" << std::endl;
+        }
+    } else {
+        std::ofstream mainFile(entryPoint);
+        mainFile << "// " << projectName << " — an ALU project" << std::endl;
+        mainFile << "// Created by alupm" << std::endl;
+        mainFile << std::endl;
+        mainFile << "import std::io;" << std::endl;
+        mainFile << std::endl;
+        mainFile << "routine main() -> int {" << std::endl;
+        mainFile << "    print(\"Hello from " << projectName << "!\");" << std::endl;
+        mainFile << "    return 0;" << std::endl;
+        mainFile << "}" << std::endl;
+        mainFile.close();
+    }
 
     // Create alu_modules/
     fs::create_directory("alu_modules");
@@ -149,6 +192,7 @@ static int cmdInit(const std::string& name) {
         gitignore << "*.exe" << std::endl;
         gitignore << "*.so" << std::endl;
         gitignore << "*.dylib" << std::endl;
+        gitignore << "*.xcframework/" << std::endl;
         gitignore << std::endl;
         gitignore << "# Dependencies" << std::endl;
         gitignore << "alu_modules/" << std::endl;
@@ -160,13 +204,19 @@ static int cmdInit(const std::string& name) {
     std::cout << std::endl;
     std::cout << "  Created:" << std::endl;
     std::cout << "    " << COLOR_CYAN << "alu.toml" << COLOR_RESET << "         — project manifest" << std::endl;
-    std::cout << "    " << COLOR_CYAN << "src/main.alu" << COLOR_RESET << "     — entry point" << std::endl;
+    std::cout << "    " << COLOR_CYAN << entryPoint << COLOR_RESET << "     — entry point" << std::endl;
     std::cout << "    " << COLOR_CYAN << "alu_modules/" << COLOR_RESET << "     — dependencies directory" << std::endl;
     std::cout << "    " << COLOR_CYAN << ".gitignore" << COLOR_RESET << "       — git ignore rules" << std::endl;
     std::cout << std::endl;
     std::cout << "  Next steps:" << std::endl;
     std::cout << "    " << COLOR_DIM << "alupm build" << COLOR_RESET << "       — compile the project" << std::endl;
-    std::cout << "    " << COLOR_DIM << "alupm run" << COLOR_RESET << "         — build and run" << std::endl;
+    if (tmpl == "android-app") {
+        std::cout << "    " << COLOR_DIM << "build_android.bat" << COLOR_RESET << " — build the Android APK/SO" << std::endl;
+    } else if (tmpl == "ios-app") {
+        std::cout << "    " << COLOR_DIM << "bash build_ios.sh" << COLOR_RESET << " — build the iOS XCFramework" << std::endl;
+    } else {
+        std::cout << "    " << COLOR_DIM << "alupm run" << COLOR_RESET << "         — build and run" << std::endl;
+    }
     std::cout << "    " << COLOR_DIM << "alupm install" << COLOR_RESET << "     — add dependencies" << std::endl;
     std::cout << std::endl;
 
@@ -505,6 +555,7 @@ int main(int argc, char** argv) {
     std::string gitUrl;
     std::string pathDep;
     std::string targetTriple;
+    std::string templateName;
     bool debug = false;
     std::vector<std::string> runArgs;
     bool collectingRunArgs = false;
@@ -526,6 +577,10 @@ int main(int argc, char** argv) {
             gitUrl = argv[++i];
         } else if (arg == "--path" && i + 1 < argc) {
             pathDep = argv[++i];
+        } else if (arg == "--template" && i + 1 < argc) {
+            templateName = argv[++i];
+        } else if (arg.find("--template=") == 0) {
+            templateName = arg.substr(11);
         } else if (arg.find("--target=") == 0) {
             targetTriple = arg.substr(9);
         } else if (arg == "-g" || arg == "--debug") {
@@ -540,7 +595,7 @@ int main(int argc, char** argv) {
 
     // Dispatch commands
     if (command == "init") {
-        return cmdInit(positionalArgs.empty() ? "" : positionalArgs[0]);
+        return cmdInit(positionalArgs.empty() ? "" : positionalArgs[0], templateName);
     } else if (command == "install" || command == "add") {
         return cmdInstall(positionalArgs.empty() ? "" : positionalArgs[0], gitUrl, pathDep);
     } else if (command == "uninstall" || command == "remove") {

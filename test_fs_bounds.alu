@@ -1,0 +1,8 @@
+import "std/fs.alu";
+
+routine main() -> int {
+    // Z3 should reject this because size > 0 is violated
+    ptr<byte> buffer = alloc(1024);
+    int read_bytes = fs_fread(buffer, 0, 1);
+    return read_bytes;
+}

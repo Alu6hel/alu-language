@@ -1,4 +1,7 @@
-[project]
-name="test_project"
+[package]
+name = "test_app"
+version = "1.0.0"
+entry = "test_simple.alu"
+
 [dependencies]
 std = "file:///C:/Users/Alu/source/repos/Alu6hel/alu-std"

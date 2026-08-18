@@ -41,18 +41,18 @@ def map_type(clang_type):
         else:
             base_alu = map_type(pointee)
             if base_alu:
-                return f"ptr<{base_alu}>"
-            return "ptr<byte>"
+                return f"ptr< {base_alu} >"
+            return "ptr< byte >"
     
     elif canonical.kind == TypeKind.RECORD:
-        return canonical.spelling.replace("struct ", "").strip()
+        return canonical.spelling.replace("struct ", "").replace("union ", "").replace("const ", "").strip()
     
     elif canonical.kind == TypeKind.ENUM:
         return "int"
     
     elif canonical.kind == TypeKind.CONSTANTARRAY or canonical.kind == TypeKind.INCOMPLETEARRAY:
         elem_type = map_type(canonical.element_type)
-        return f"ptr<{elem_type}>"
+        return f"ptr< {elem_type} >"
         
     elif canonical.kind in TYPE_MAP:
         return TYPE_MAP[canonical.kind]
@@ -70,14 +70,16 @@ def parse_header(header_path, output_path):
     parsed_structs = set()
     parsed_funcs = set()
     
-    def visit(node):
+
+    # Pass 1: Real definitions
+    for node in tu.cursor.get_children():
         if node.location.file and node.location.file.name != tu.spelling:
-            return # Only process types in the main header
+            continue
             
         if node.kind == CursorKind.STRUCT_DECL or node.kind == CursorKind.UNION_DECL:
             name = node.spelling
             if not name:
-                name = node.type.spelling.replace("struct ", "").strip()
+                name = node.type.spelling.replace("struct ", "").replace("union ", "").strip()
             
             if name and name not in parsed_structs:
                 fields = list(node.get_children())
@@ -90,9 +92,8 @@ def parse_header(header_path, output_path):
                             out.append(f"    {alu_type} {field.spelling} ;")
                     out.append("}")
                     out.append("")
-        
+                    
         elif node.kind == CursorKind.TYPEDEF_DECL:
-            # Handle typedef struct { ... } Name;
             underlying = node.underlying_typedef_type.get_canonical()
             if underlying.kind == TypeKind.RECORD:
                 name = node.spelling
@@ -108,8 +109,25 @@ def parse_header(header_path, output_path):
                                 out.append(f"    {alu_type} {field.spelling} ;")
                         out.append("}")
                         out.append("")
-                        
+
+    # Pass 2: Opaque handles and Functions
+    for node in tu.cursor.get_children():
+        if node.location.file and node.location.file.name != tu.spelling:
+            continue
+            
+        if node.kind == CursorKind.STRUCT_DECL or node.kind == CursorKind.UNION_DECL:
+            name = node.spelling
+            if not name:
+                name = node.type.spelling.replace("struct ", "").replace("union ", "").strip()
+            if name and name not in parsed_structs:
+                parsed_structs.add(name)
+                out.append(f"struct {name} {{")
+                out.append(f"    int opaque_dummy_field ;")
+                out.append("}")
+                out.append("")
+                
         elif node.kind == CursorKind.FUNCTION_DECL:
+
             name = node.spelling
             if name not in parsed_funcs:
                 parsed_funcs.add(name)
@@ -126,9 +144,7 @@ def parse_header(header_path, output_path):
                     out.append(f"extern routine {name} ( {params_str} ) -> {ret_type} ;")
                 else:
                     out.append(f"extern routine {name} ( ) -> {ret_type} ;")
-    
-    for child in tu.cursor.get_children():
-        visit(child)
+
         
     with open(output_path, "w") as f:
         f.write("\n".join(out))

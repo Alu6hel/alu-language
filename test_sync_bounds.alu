@@ -1,0 +1,7 @@
+import "std/sync.alu";
+
+routine main() -> int {
+    // Z3 should reject this because count > 0 is violated
+    int b = sync_barrier_new(0);
+    return b;
+}

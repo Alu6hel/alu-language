@@ -1,0 +1,10 @@
+[dependencies]
+
+[package]
+authors = ["Your Name"]
+description = "An ALU project"
+entry = "src/App.alu"
+license = "MIT"
+name = "test_android"
+version = "0.1.0"
+

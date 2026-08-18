@@ -95,20 +95,32 @@ std::vector<Token> Lexer::tokenize() {
         } 
         else if (isdigit(c)) {
             std::string num = "";
-            while (isdigit(currentChar())) {
-                num += currentChar();
-                advance();
-            }
-            if (currentChar() == '.') {
-                num += '.';
-                advance();
+            if (c == '0' && (pos + 1 < source.length() && (source[pos + 1] == 'x' || source[pos + 1] == 'X'))) {
+                num += c;
+                advance(); // consume '0'
+                num += currentChar(); // 'x'
+                advance(); // consume 'x'
+                while (isxdigit(currentChar())) {
+                    num += currentChar();
+                    advance();
+                }
+                tokens.push_back({TokenType::TOK_INT_LITERAL, num, startLine, startCol});
+            } else {
                 while (isdigit(currentChar())) {
                     num += currentChar();
                     advance();
                 }
-                tokens.push_back({TokenType::TOK_FLOAT_LITERAL, num, startLine, startCol});
-            } else {
-                tokens.push_back({TokenType::TOK_INT_LITERAL, num, startLine, startCol});
+                if (currentChar() == '.') {
+                    num += '.';
+                    advance();
+                    while (isdigit(currentChar())) {
+                        num += currentChar();
+                        advance();
+                    }
+                    tokens.push_back({TokenType::TOK_FLOAT_LITERAL, num, startLine, startCol});
+                } else {
+                    tokens.push_back({TokenType::TOK_INT_LITERAL, num, startLine, startCol});
+                }
             }
         }
         else if (c == '"' || c == '\'') {

@@ -1,28 +1,380 @@
 // ALU Self-Hosted Semantic Analyzer
 // Verifies types, ownership bounds, and checks for cyclical reference memory leaks.
 
-routine check_cyclical_references(ptr<ASTNode> ast_node) -> int {
-    // Traverse the AST struct definitions mapping internal pointers to fields
-    // Ensure no graph path loops back to itself, ensuring ARC safety
+import compiler::ast;
+
+
+
+
+
+
+struct Symbol {
+    string name;
+    int type_id;
+    ptr<Symbol> next;
+}
+
+struct CompilationErrorNode {
+    string message;
+    string file;
+    int line;
+    int col;
+    ptr<CompilationErrorNode> next;
+}
+
+struct Scope {
+    ptr<Symbol> symbols;
+    ptr<Scope> parent;
+}
+
+struct ErrorList {
+    ptr<CompilationErrorNode> head;
+}
+
+routine get_null_error() -> ptr<CompilationErrorNode> {
+    ptr<CompilationErrorNode> p = alloc(0);
+    return p;
+}
+
+routine is_null_error(ptr<CompilationErrorNode> p) -> int {
+    if (p == get_null_error()) { return 1; }
+    return 0;
+}
+
+routine report_error(ptr<ErrorList> list, string msg) -> int {
+    ptr<CompilationErrorNode> err = alloc(40);
+    err.message = msg;
+    err.next = list.head;
+    list.head = err;
     return 1;
 }
 
-routine check_type_safety(ptr<ASTNode> ast_node) -> int {
-    // Walk AST recursively verifying bin-op and variable assignment signatures
+routine get_null_scope() -> ptr<Scope> {
+    ptr<Scope> p = alloc(0);
+    return p;
+}
+routine get_null_symbol() -> ptr<Symbol> {
+    ptr<Symbol> p = alloc(0);
+    return p;
+}
+
+routine is_null_ast(ptr<ASTNode> p) -> int {
+    if (p == get_null_ast()) { return 1; }
+    return 0;
+}
+
+routine is_null_scope(ptr<Scope> p) -> int {
+    if (p == get_null_scope()) { return 1; }
+    return 0;
+}
+
+routine is_null_symbol(ptr<Symbol> p) -> int {
+    if (p == get_null_symbol()) { return 1; }
+    return 0;
+}
+
+routine push_scope(ptr<Scope> current) -> ptr<Scope> {
+    ptr<Scope> new_scope = alloc(16);
+    new_scope.parent = current;
+    new_scope.symbols = get_null_symbol();
+    return new_scope;
+}
+
+routine pop_scope(ptr<Scope> current) -> ptr<Scope> {
+    if (is_null_scope(current) == 1) {
+        return get_null_scope();
+    }
+    return current.parent;
+}
+
+routine declare_symbol(ptr<Scope> scope, string name, int type_id) -> int {
+    // Check if already in current scope
+    ptr<Symbol> curr = scope.symbols;
+    while (is_null_symbol(curr) == 0) {
+        if (str_eq(curr.name, name) == 1) {
+            return 0; // Error: already declared
+        }
+        curr = curr.next;
+    }
+    
+    ptr<Symbol> new_sym = alloc(24);
+    new_sym.name = name;
+    new_sym.type_id = type_id;
+    new_sym.next = scope.symbols;
+    scope.symbols = new_sym;
+    
     return 1;
+}
+
+routine lookup_symbol(ptr<Scope> scope, string name) -> int {
+    ptr<Scope> current_scope = scope;
+    while (is_null_scope(current_scope) == 0) {
+        ptr<Symbol> curr = current_scope.symbols;
+        while (is_null_symbol(curr) == 0) {
+            if (str_eq(curr.name, name) == 1) {
+                return curr.type_id;
+            }
+            curr = curr.next;
+        }
+        current_scope = current_scope.parent;
+    }
+    return 0; // Unknown
+}
+
+routine type_str_to_id(string type_str) -> int {
+    if (str_eq(type_str, "int") == 1) { return 1; }
+    if (str_eq(type_str, "string") == 1) { return 2; }
+    if (str_eq(type_str, "bool") == 1) { return 3; }
+    if (str_eq(type_str, "ptr") == 1) { return 4; }
+    return 0;
+}
+
+routine check_scope_resolution_inner(ptr<ASTNode> node, ptr<Scope> current_scope) -> int {
+    if (is_null_ast(node) == 1) { return 1; }
+    
+    int is_safe = 1;
+    ptr<Scope> active_scope = current_scope;
+    
+    int is_scope_creator = 0;
+    if (node.node_type == 1) { is_scope_creator = 1; }
+    if (node.node_type == 2) { is_scope_creator = 1; }
+    if (node.node_type == 3) { is_scope_creator = 1; }
+    
+    if (is_scope_creator == 1) {
+        // Routine, Condition, Loop -> create new scope
+        active_scope = push_scope(current_scope);
+    }
+    
+    if (node.node_type == 5) { // VariableDecl
+        // left is the type string node
+        string type_str = "int"; // fallback
+        if (is_null_ast(node.left) == 0) {
+            ptr<ASTNode> cl = node.left;
+            type_str = cl.value;
+        }
+        int tid = type_str_to_id(type_str);
+        int declared = declare_symbol(active_scope, node.value, tid);
+        if (declared == 0) {
+            print_str_3("[ALU Semantic] Error: Variable already declared in scope: ", node.value, "");
+            return 0;
+        }
+    }
+    
+    if (node.node_type == 9) { // VarAccess
+        int tid = lookup_symbol(active_scope, node.value);
+        if (tid == 0) {
+            print_str_3("[ALU Semantic] Error: Undefined variable accessed: ", node.value, "");
+            return 0;
+        }
+    }
+    
+    // Traverse children
+    if (is_null_ast(node.left) == 0) {
+        if (check_scope_resolution_inner(node.left, active_scope) == 0) {
+            is_safe = 0;
+        }
+    }
+    if (is_null_ast(node.right) == 0) {
+        if (check_scope_resolution_inner(node.right, active_scope) == 0) {
+            is_safe = 0;
+        }
+    }
+    
+    return is_safe;
 }
 
 routine check_scope_resolution(ptr<ASTNode> ast_node) -> int {
-    // Bind all identifier references to lexical scope declarations
+    ptr<Scope> global_scope = push_scope(get_null_scope());
+    return check_scope_resolution_inner(ast_node, global_scope);
+}
+
+// Check type safety
+routine get_expr_type(ptr<ASTNode> node, ptr<Scope> scope) -> int {
+    if (is_null_ast(node) == 1) { return 0; }
+    if (node.node_type == 9) { // VarAccess
+        return lookup_symbol(scope, node.value);
+    }
+    if (node.node_type == 10) { // Literal
+        // simplified, assume int literal
+        return 1;
+    }
+    if (node.node_type == 8) { // BinOp
+        // if op is comparison, return bool (3)
+        int is_cmp = 0;
+        if (str_eq(node.value, "==") == 1) { is_cmp = 1; }
+        if (str_eq(node.value, "<") == 1) { is_cmp = 1; }
+        if (str_eq(node.value, ">") == 1) { is_cmp = 1; }
+        if (is_cmp == 1) {
+            return 3;
+        }
+        // otherwise return left type
+        return get_expr_type(node.left, scope);
+    }
+    return 0;
+}
+
+routine check_type_safety_inner(ptr<ASTNode> node, ptr<Scope> current_scope) -> int {
+    if (is_null_ast(node) == 1) { return 1; }
+    
+    int is_safe = 1;
+    ptr<Scope> active_scope = current_scope;
+    
+    int is_scope_creator = 0;
+    if (node.node_type == 1) { is_scope_creator = 1; }
+    if (node.node_type == 2) { is_scope_creator = 1; }
+    if (node.node_type == 3) { is_scope_creator = 1; }
+    
+    if (is_scope_creator == 1) {
+        active_scope = push_scope(current_scope);
+    }
+    
+    if (node.node_type == 5) { // VarDecl
+        string type_str = "int"; // fallback
+        if (is_null_ast(node.left) == 0) {
+            ptr<ASTNode> cl2 = node.left;
+            type_str = cl2.value;
+        }
+        int expected = type_str_to_id(type_str);
+        declare_symbol(active_scope, node.value, expected);
+        
+        if (is_null_ast(node.right) == 0) {
+            int actual = get_expr_type(node.right, active_scope);
+            if (actual != 0) {
+                if (actual != expected) {
+                    print_str_3("[ALU Semantic] Error: Type mismatch in declaration of ", node.value, "");
+                    return 0;
+                }
+            }
+        }
+    }
+    
+    int is_cond = 0;
+    if (node.node_type == 2) { is_cond = 1; }
+    if (node.node_type == 3) { is_cond = 1; }
+    
+    if (is_cond == 1) { // Condition / Loop
+        if (is_null_ast(node.left) == 0) {
+            int cond_type = get_expr_type(node.left, active_scope);
+            int is_valid_cond = 0;
+            if (cond_type == 3) { is_valid_cond = 1; }
+            if (cond_type == 0) { is_valid_cond = 1; }
+            if (is_valid_cond == 0) {
+                print("[ALU Semantic] Error: Condition must evaluate to a boolean.");
+                return 0;
+            }
+        }
+    }
+    
+    // Traverse children
+    if (is_null_ast(node.left) == 0) {
+        if (check_type_safety_inner(node.left, active_scope) == 0) {
+            is_safe = 0;
+        }
+    }
+    if (is_null_ast(node.right) == 0) {
+        if (check_type_safety_inner(node.right, active_scope) == 0) {
+            is_safe = 0;
+        }
+    }
+    
+    return is_safe;
+}
+
+routine check_type_safety(ptr<ASTNode> ast_node) -> int {
+    ptr<Scope> global_scope = push_scope(get_null_scope());
+    return check_type_safety_inner(ast_node, global_scope);
+}
+
+// A simple DFS on AST structure (alloc nodes) to simulate finding loops
+routine check_cyclical_references_inner(ptr<ASTNode> node, int depth) -> int {
+    if (is_null_ast(node) == 1) { return 1; }
+    if (depth > 100) {
+        // Potential cycle in AST or object graph representation
+        return 0; 
+    }
+    if (check_cyclical_references_inner(node.left, depth + 1) == 0) { return 0; }
+    if (check_cyclical_references_inner(node.right, depth + 1) == 0) { return 0; }
     return 1;
 }
 
-@requires("ast_root != null")
+routine check_cyclical_references(ptr<ASTNode> ast_node) -> int {
+    return check_cyclical_references_inner(ast_node, 0);
+}
+
+// ---------------------------------------------------------
+// ARC (Automatic Reference Counting) Injection Pass
+// ---------------------------------------------------------
+routine inject_arc_inner(ptr<ASTNode> node) -> int {
+    if (is_null_ast(node) == 1) { return 1; }
+    
+    inject_arc_inner(node.left);
+    inject_arc_inner(node.right);
+    
+    if (node.node_type == 6) { // VarAssign
+        // Create a copy of the assignment
+        ptr<ASTNode> assign_copy = create_ast_node(6);
+        assign_copy.value = node.value;
+        assign_copy.left = node.left;
+        assign_copy.right = node.right;
+        
+        // Create alu_release call for the old variable
+        ptr<ASTNode> release_call = create_ast_node(13); // FuncCallNode
+        release_call.value = "alu_release";
+        release_call.left = assign_copy.left; // the variable name
+        
+        // Mutate node to become a Block
+        node.node_type = 4; // BlockNode
+        node.value = "ARC_BLOCK";
+        node.left = release_call;
+        node.right = assign_copy;
+    }
+    
+    if (node.node_type == 14) { // MemberAssign
+        ptr<ASTNode> assign_copy = create_ast_node(14);
+        assign_copy.value = node.value;
+        assign_copy.left = node.left;
+        assign_copy.right = node.right;
+        
+        // Create alu_release call for the old field
+        ptr<ASTNode> release_call = create_ast_node(13);
+        release_call.value = "alu_release";
+        release_call.left = assign_copy.left; // the field access
+        
+        // Mutate node to become a Block
+        node.node_type = 4;
+        node.value = "ARC_BLOCK";
+        node.left = release_call;
+        node.right = assign_copy;
+    }
+    
+    if (node.node_type == 9) { // VarAccess
+        ptr<ASTNode> access_copy = create_ast_node(9);
+        access_copy.value = node.value;
+        access_copy.left = node.left;
+        access_copy.right = node.right;
+        
+        node.node_type = 13; // FuncCall
+        node.value = "alu_retain";
+        node.left = access_copy;
+        node.right = get_null_ast();
+    }
+    
+    return 1;
+}
+
+routine inject_arc(ptr<ASTNode> ast_node) -> int {
+    print("[ALU Semantic] Injecting ARC instructions (alu_retain / alu_release)...");
+    return inject_arc_inner(ast_node);
+}
+
+@requires("ast_root != null") // Z3 understands 'null'
 routine analyze_semantics(ptr<ASTNode> ast_root) -> int {
     
     print("[ALU Semantic] Running Semantic Analysis...");
     
+    print("Checking scope resolution...");
     int scope_safe = check_scope_resolution(ast_root);
+    print("Scope resolution done.");
     if (scope_safe == 0) {
         print("[ALU Semantic] Error: Variable scope resolution failed.");
         return 0;
@@ -37,6 +389,12 @@ routine analyze_semantics(ptr<ASTNode> ast_root) -> int {
     int arc_safe = check_cyclical_references(ast_root);
     if (arc_safe == 0) {
         print("[ALU Semantic] Error: Cyclical reference detected. Potential memory leak.");
+        return 0;
+    }
+    
+    int arc_injected = inject_arc(ast_root);
+    if (arc_injected == 0) {
+        print("[ALU Semantic] Error: Failed to inject ARC instructions.");
         return 0;
     }
     

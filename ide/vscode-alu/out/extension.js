@@ -36,9 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
-const aluDebug_1 = require("./aluDebug");
 const node_1 = require("vscode-languageclient/node");
 const path = __importStar(require("path"));
+const cp = __importStar(require("child_process"));
 let client;
 function activate(context) {
     const serverPath = process.platform === 'win32'
@@ -52,36 +52,61 @@ function activate(context) {
         documentSelector: [{ scheme: 'file', language: 'alu' }]
     };
     client = new node_1.LanguageClient('aluLanguageServer', 'ALU Language Server', serverOptions, clientOptions);
-    // Register a configuration provider for 'alu-debug' debug type
     context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('alu-debug', new AluConfigurationProvider()));
-    // Register a debug adapter descriptor factory that points to our inline AluDebugSession
-    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('alu-debug', new InlineDebugAdapterFactory()));
     client.start();
 }
 class AluConfigurationProvider {
-    resolveDebugConfiguration(folder, config, token) {
-        // if launch.json is missing or empty
+    async resolveDebugConfiguration(folder, config, token) {
         if (!config.type && !config.request && !config.name) {
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'alu') {
                 config.type = 'alu-debug';
-                config.name = 'Launch';
+                config.name = 'Debug ALU';
                 config.request = 'launch';
                 config.program = '${file}';
-                config.stopOnEntry = true;
             }
         }
         if (!config.program) {
-            return vscode.window.showInformationMessage("Cannot find a program to debug").then(_ => {
-                return undefined;
-            });
+            vscode.window.showInformationMessage("Cannot find a program to debug");
+            return undefined;
         }
-        return config;
-    }
-}
-class InlineDebugAdapterFactory {
-    createDebugAdapterDescriptor(_session) {
-        return new vscode.DebugAdapterInlineImplementation(new aluDebug_1.AluDebugSession());
+        const lldbExt = vscode.extensions.getExtension("vadimcn.vscode-lldb");
+        if (!lldbExt) {
+            vscode.window.showErrorMessage("The 'CodeLLDB' extension (vadimcn.vscode-lldb) is required to debug ALU programs. Please install it.");
+            return undefined;
+        }
+        return new Promise((resolve) => {
+            vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: "Compiling ALU program for debugging...",
+                cancellable: false
+            }, async (progress) => {
+                const workspacePath = folder ? folder.uri.fsPath : path.dirname(vscode.window.activeTextEditor?.document.uri.fsPath || "");
+                const programPath = config.program.replace('${file}', vscode.window.activeTextEditor?.document.uri.fsPath || "");
+                const outBin = programPath.replace(/\.alu$/, process.platform === 'win32' ? '.exe' : '');
+                const aluExe = process.platform === 'win32' ? "alu.exe" : "alu";
+                const compileCmd = `${aluExe} build "${programPath}" -g`;
+                cp.exec(compileCmd, { cwd: workspacePath }, (err, stdout, stderr) => {
+                    if (err) {
+                        vscode.window.showErrorMessage(`Compilation failed: ${stderr}`);
+                        resolve(undefined);
+                        return;
+                    }
+                    // Replace the alu-debug config with a valid lldb config
+                    const lldbConfig = {
+                        type: 'lldb',
+                        request: 'launch',
+                        name: config.name,
+                        program: outBin,
+                        args: config.args || [],
+                        cwd: config.cwd || workspacePath,
+                        stopOnEntry: config.stopOnEntry === true,
+                        terminal: 'integrated'
+                    };
+                    resolve(lldbConfig);
+                });
+            });
+        });
     }
 }
 function deactivate() {

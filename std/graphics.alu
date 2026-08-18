@@ -1,0 +1,26 @@
+// ALU Native Standard Library: Graphics
+// High-level cross-platform graphics abstraction layer
+
+import "std/mem.alu";
+import "std/gles3.alu";
+import "std/vulkan.alu";
+
+struct GraphicsContext {
+    int backend; // 0 for GLES3, 1 for Vulkan
+    int window_width;
+    int window_height;
+}
+
+routine gfx_init(int backend_type) -> ptr<GraphicsContext> {
+    ptr<GraphicsContext> ctx = alu_alloc(12);
+    ctx.backend = backend_type;
+    ctx.window_width = 800;
+    ctx.window_height = 600;
+    return ctx;
+}
+
+routine gfx_clear_color(float r, float g, float b, float a) -> void {
+    // In the future this will dispatch based on context.backend
+    // For now we just bind to the raw GLES3 / Vulkan externally, 
+    // but the abstraction layer handles cross-platform logic here.
+}

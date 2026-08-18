@@ -21,6 +21,7 @@ extern "C" {
         if (!header) return NULL;
         header->magic = ARC_MAGIC;
         header->ref_count = 1;
+        printf("ARC: alloc %p (ref_count=1)\n", (void*)(header + 1));
         return (void*)(header + 1);
     }
     
@@ -74,6 +75,7 @@ extern "C" {
 
         if (header->magic == ARC_MAGIC) {
             header->ref_count++;
+            printf("ARC: retain %p (ref_count=%lld)\n", ptr, header->ref_count);
         }
     }
     
@@ -86,7 +88,9 @@ extern "C" {
 
         if (header->magic == ARC_MAGIC) {
             header->ref_count--;
+            printf("ARC: release %p (ref_count=%lld)\n", ptr, header->ref_count);
             if (header->ref_count <= 0) {
+                printf("ARC: free %p\n", ptr);
                 free(header);
             }
         }

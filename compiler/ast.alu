@@ -1,5 +1,6 @@
-// ALU Self-Hosted AST (Abstract Syntax Tree)
-// Parses token streams into a structured memory tree
+// ALU Self-Hosted Parser
+
+import compiler::lexer;
 
 struct ASTNode {
     int node_type;
@@ -8,63 +9,269 @@ struct ASTNode {
     ptr<ASTNode> right;
 }
 
-@requires("token_stream != null")
-@requires("token_count > 0")
-routine parse_tokens(ptr<byte> token_stream, int token_count) -> ptr<ASTNode> {
-    ptr<ASTNode> ast_root = alloc(10240); // 10KB AST allocation
-    int current_token = 0;
-    
-    // Very basic parsing mock for self-hosting proof
-    while (current_token < token_count) {
-        string type = read_token_type(token_stream, current_token);
-        
-        if (str_eq(type, "KEYWORD_ROUTINE") == 1) {
-            // Allocate memory for Routine AST Node
-            ptr<ASTNode> routine_node = alloc(128);
-            attach_node(ast_root, routine_node);
-        }
-        
-        current_token = current_token + 1;
-    }
-    
-    return ast_root;
+struct ParserContext {
+    ptr<Token> current_token;
 }
 
-// Full ASTNode Types Enum (Simulated)
-// 1 = Routine, 2 = Condition, 3 = Loop
-// 4 = Alloc, 5 = VariableDecl, 6 = Spawn, 7 = Lock
 
-routine read_token_type(ptr<byte> stream, int idx) -> string {
-    // Array read mock
-    return "KEYWORD_ROUTINE";
+
+
+
+
+routine get_null_ast() -> ptr<ASTNode> {
+    ptr<ASTNode> p = alloc(0);
+    return p;
 }
 
-routine create_ast_node(int node_type) -> ptr<ASTNode> {
-    ptr<ASTNode> node = alloc(128);
-    // write node_type to node memory
+routine create_ast_node(int type, string val) -> ptr<ASTNode> {
+    ptr<ASTNode> node = alloc(32);
+    node.node_type = type;
+    node.value = val;
+    node.left = get_null_ast();
+    node.right = get_null_ast();
     return node;
 }
 
-extern routine str_eq(string a, string b) -> int;
+routine advance(ptr<ParserContext> ctx) -> int {
+    print("In advance");
+    if (ctx.current_token != get_null_token()) {
+        ptr<Token> t = ctx.current_token;
+        ctx.current_token = t.next;
+    }
+    return 0;
+}
 
-routine parse_statement(ptr<byte> token_stream, int idx) -> ptr<ASTNode> {
-    string type = read_token_type(token_stream, idx);
-    
-    if (str_eq(type, "KEYWORD_SPAWN") == 1) {
-        return create_ast_node(6); // Spawn
+routine peek(ptr<ParserContext> ctx) -> int {
+    print("In peek");
+    if (ctx.current_token != get_null_token()) {
+        ptr<Token> t = ctx.current_token;
+        print("Peek returning token type");
+        return t.token_type;
     }
-    if (str_eq(type, "KEYWORD_LOCK") == 1) {
-        return create_ast_node(7); // Lock
+    return 0;
+}
+
+routine match(ptr<ParserContext> ctx, int type) -> int {
+    print("In match");
+    if (peek(ctx) == type) {
+        advance(ctx);
+        return 1;
     }
-    if (str_eq(type, "KEYWORD_LOOP") == 1) {
-        return create_ast_node(3); // Loop
-    }
-    
-    ptr<ASTNode> null_node = alloc(0);
-    return null_node;
+    return 0;
+}
+
+routine expect(ptr<ParserContext> ctx, int type) -> int {
+    if (match(ctx, type) == 1) { return 1; }
+    print_str_3("[ALU Parser] Error: Expected token type ", "", "");
+    return 0;
 }
 
 routine attach_node(ptr<ASTNode> parent, ptr<ASTNode> child) -> int {
-    // Pointer attachment mock
+    if (parent.left == get_null_ast()) {
+        parent.left = child;
+    } else {
+        ptr<ASTNode> current = parent.left;
+        int searching = 1;
+        while (searching == 1) {
+            if (current.right == get_null_ast()) {
+                current.right = child;
+                searching = 0;
+            } else {
+                current = current.right;
+            }
+        }
+    }
     return 0;
+}
+
+routine parse_expression(ptr<ParserContext> ctx) -> ptr<ASTNode> {
+    if (peek(ctx) == 3) { // INT_LITERAL
+        ptr<Token> t = ctx.current_token;
+        string val = t.value;
+        advance(ctx);
+        return create_ast_node(10, val); // LiteralNode
+    }
+    
+    if (peek(ctx) == 1) { // IDENTIFIER
+        ptr<Token> t = ctx.current_token;
+        string name = t.value;
+        advance(ctx);
+        
+        if (str_eq(name, "alloc") == 1) {
+            if (match(ctx, 36) == 1) { // '('
+                ptr<ASTNode> expr = parse_expression(ctx);
+                expect(ctx, 37); // ')'
+                ptr<ASTNode> call = create_ast_node(13, "alloc");
+                call.left = expr;
+                return call;
+            }
+        }
+        if (str_eq(name, "new") == 1) {
+            ptr<Token> tname_t = ctx.current_token;
+            string tname = tname_t.value; // IDENTIFIER
+            advance(ctx);
+            ptr<ASTNode> allocNode = create_ast_node(28, tname); // NewAllocationNode is 28, but let's use 28 or whatever
+            return allocNode;
+        }
+        
+        // Check for function call
+        if (match(ctx, 36) == 1) { // '('
+            ptr<ASTNode> call = create_ast_node(13, name); // FuncCallNode
+            // parse args (skipped for simple mock)
+            if (peek(ctx) != 37) {
+                ptr<ASTNode> arg = parse_expression(ctx);
+                call.left = arg;
+            }
+            expect(ctx, 37); // ')'
+            return call;
+        }
+        
+        ptr<ASTNode> varAccess = create_ast_node(9, name); // VarAccessNode
+        return varAccess;
+    }
+    
+    return get_null_ast();
+}
+
+routine parse_statement(ptr<ParserContext> ctx) -> ptr<ASTNode> {
+    // Check if return
+    if (match(ctx, 10) == 1) { // RETURN
+        ptr<ASTNode> ret = create_ast_node(20, "return"); // Use 20 for Return
+        ret.left = parse_expression(ctx);
+        expect(ctx, 53); // ';'
+        return ret;
+    }
+    
+    // VarDecl or VarAssign or MemberAssign
+    if (peek(ctx) == 1) { // IDENTIFIER
+        ptr<Token> t = ctx.current_token;
+        string name = t.value;
+        advance(ctx);
+        
+        if (match(ctx, 1) == 1) { // VarDecl: Type Name (simplified `Node n = ...`)
+            // Actually, leak_test has `ptr<Node> n = ...`
+        }
+        
+        // Simplified generic assignment
+        // Since we don't have a full type parser, we assume `ptr<Node> n = expr` is parsed if we see `<`
+        if (match(ctx, 43) == 1) { // '<'
+            ptr<Token> tin_t = ctx.current_token;
+            string t_inner = tin_t.value; advance(ctx);
+            expect(ctx, 45); // '>'
+            ptr<Token> vn_t = ctx.current_token;
+            string var_name = vn_t.value; advance(ctx);
+            if (match(ctx, 40) == 1) { // '='
+                ptr<ASTNode> decl = create_ast_node(5, var_name);
+                decl.left = parse_expression(ctx);
+                expect(ctx, 53);
+                return decl;
+            }
+        }
+        
+        if (match(ctx, 55) == 1) { // '.'
+            ptr<Token> f_t = ctx.current_token;
+            string field = f_t.value; advance(ctx);
+            if (match(ctx, 40) == 1) { // '='
+                ptr<ASTNode> massign = create_ast_node(14, name); // MemberAssign
+                ptr<ASTNode> faccess = create_ast_node(100, field);
+                massign.left = faccess; // simplified
+                massign.right = parse_expression(ctx);
+                expect(ctx, 53);
+                return massign;
+            }
+        }
+        
+        if (match(ctx, 40) == 1) { // '='
+            ptr<ASTNode> assign = create_ast_node(6, name);
+            assign.left = parse_expression(ctx);
+            expect(ctx, 53);
+            return assign;
+        }
+    }
+    
+    return get_null_ast();
+}
+
+routine parse_routine(ptr<ParserContext> ctx, int is_extern) -> ptr<ASTNode> {
+    ptr<Token> t = ctx.current_token;
+    string name = t.value;
+    advance(ctx); // consume name
+    expect(ctx, 36); // '('
+    // skip args
+    while (peek(ctx) != 37) { advance(ctx); }
+    expect(ctx, 37); // ')'
+    
+    if (match(ctx, 47) == 1) { // '->'
+        advance(ctx); // skip type
+    }
+    
+    ptr<ASTNode> rtn = get_null_ast();
+    if (is_extern == 1) {
+        rtn = create_ast_node(538, name); // ExternRoutineNode
+        expect(ctx, 53); // ';'
+    } else {
+        rtn = create_ast_node(1, name);
+        expect(ctx, 38); // '{'
+        while (peek(ctx) != 39) { // '}'
+            ptr<ASTNode> stmt = parse_statement(ctx);
+            if (stmt != get_null_ast()) {
+                attach_node(rtn, stmt);
+            } else {
+                advance(ctx); // fallback to avoid infinite loop
+            }
+        }
+        expect(ctx, 39); // '}'
+    }
+    return rtn;
+}
+
+routine parse_struct(ptr<ParserContext> ctx) -> ptr<ASTNode> {
+    ptr<Token> t = ctx.current_token;
+    string name = t.value;
+    advance(ctx); // consume name
+    expect(ctx, 38); // '{'
+    ptr<ASTNode> stNode = create_ast_node(2, name);
+    while (peek(ctx) != 39) {
+        // parse fields, skip for now
+        advance(ctx);
+    }
+    expect(ctx, 39); // '}'
+    return stNode;
+}
+
+routine parse_tokens(ptr<Token> tokens, int token_count) -> ptr<ASTNode> {
+    ptr<ASTNode> ast_root = create_ast_node(815, "ProgramRoot");
+    
+    ptr<ParserContext> ctx = alloc(16);
+    ctx.current_token = tokens;
+    
+    print("Starting parse_tokens loop");
+    while (peek(ctx) != 0) { // TOK_EOF
+        int m = 0;
+        print("Peek not EOF");
+        if (match(ctx, 6) == 1) { // EXTERN
+            print("Matched EXTERN");
+            expect(ctx, 5); // ROUTINE
+            ptr<ASTNode> r = parse_routine(ctx, 1);
+            attach_node(ast_root, r);
+            m = 1;
+        }
+        if (m == 0) { if (match(ctx, 5) == 1) { // ROUTINE
+            print("Matched ROUTINE");
+            ptr<ASTNode> r = parse_routine(ctx, 0);
+            attach_node(ast_root, r);
+            m = 1;
+        }}
+        if (m == 0) { if (match(ctx, 8) == 1) { // STRUCT
+            print("Matched STRUCT");
+            ptr<ASTNode> s = parse_struct(ctx);
+            attach_node(ast_root, s);
+            m = 1;
+        }}
+        if (m == 0) {
+            advance(ctx);
+        }
+    }
+    
+    return ast_root;
 }

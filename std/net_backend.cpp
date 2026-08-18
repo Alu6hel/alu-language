@@ -12,6 +12,8 @@
     #include <netinet/in.h>
     #include <arpa/inet.h>
     #include <unistd.h>
+    #include <netdb.h>
+    #include <sys/ioctl.h>
     #define SOCKET int
     #define INVALID_SOCKET -1
     #define SOCKET_ERROR -1
@@ -132,10 +134,18 @@ int net_tcp_send(SOCKET s, const char* buffer, int len) {
 void net_tcp_discard(SOCKET s) {
     char discard_buf[1024];
     u_long mode = 1;  // 1 to enable non-blocking socket
+#ifdef _WIN32
     ioctlsocket(s, FIONBIO, &mode);
+#else
+    ioctl(s, FIONBIO, &mode);
+#endif
     recv(s, discard_buf, 1024, 0);
     mode = 0; // back to blocking
+#ifdef _WIN32
     ioctlsocket(s, FIONBIO, &mode);
+#else
+    ioctl(s, FIONBIO, &mode);
+#endif
 }
 
 void net_close(SOCKET s) {

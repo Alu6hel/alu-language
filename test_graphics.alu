@@ -1,0 +1,6 @@
+import "std/gles3.alu";
+import "std/vulkan.alu";
+
+routine main() -> int {
+    return 0;
+}

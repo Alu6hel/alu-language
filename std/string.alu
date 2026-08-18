@@ -36,3 +36,5 @@ routine string_split(string s, string delim) -> ptr<Vector<string> > {
     vec_push<string>(parts, last_p);
     return parts;
 }
+
+extern routine read_char_c(string s, int idx) -> int;

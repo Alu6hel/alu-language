@@ -1,9 +1,7 @@
 import * as vscode from 'vscode';
-import * as net from 'net';
-import { AluDebugSession } from './aluDebug';
 import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
-
 import * as path from 'path';
+import * as cp from 'child_process';
 
 let client: LanguageClient;
 
@@ -28,41 +26,70 @@ export function activate(context: vscode.ExtensionContext) {
         clientOptions
     );
 
-    // Register a configuration provider for 'alu-debug' debug type
     context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('alu-debug', new AluConfigurationProvider()));
-
-    // Register a debug adapter descriptor factory that points to our inline AluDebugSession
-    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('alu-debug', new InlineDebugAdapterFactory()));
 
     client.start();
 }
 
 class AluConfigurationProvider implements vscode.DebugConfigurationProvider {
-    resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token?: vscode.CancellationToken): vscode.ProviderResult<vscode.DebugConfiguration> {
-        // if launch.json is missing or empty
+    async resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration, token?: vscode.CancellationToken): Promise<vscode.DebugConfiguration | undefined> {
         if (!config.type && !config.request && !config.name) {
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'alu') {
                 config.type = 'alu-debug';
-                config.name = 'Launch';
+                config.name = 'Debug ALU';
                 config.request = 'launch';
                 config.program = '${file}';
-                config.stopOnEntry = true;
             }
         }
         
         if (!config.program) {
-            return vscode.window.showInformationMessage("Cannot find a program to debug").then(_ => {
-                return undefined;
-            });
+            vscode.window.showInformationMessage("Cannot find a program to debug");
+            return undefined;
         }
-        return config;
-    }
-}
 
-class InlineDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
-    createDebugAdapterDescriptor(_session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        return new vscode.DebugAdapterInlineImplementation(new AluDebugSession());
+        const lldbExt = vscode.extensions.getExtension("vadimcn.vscode-lldb");
+        if (!lldbExt) {
+            vscode.window.showErrorMessage("The 'CodeLLDB' extension (vadimcn.vscode-lldb) is required to debug ALU programs. Please install it.");
+            return undefined;
+        }
+
+        return new Promise((resolve) => {
+            vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: "Compiling ALU program for debugging...",
+                cancellable: false
+            }, async (progress) => {
+                const workspacePath = folder ? folder.uri.fsPath : path.dirname(vscode.window.activeTextEditor?.document.uri.fsPath || "");
+                const programPath = config.program.replace('${file}', vscode.window.activeTextEditor?.document.uri.fsPath || "");
+                const outBin = programPath.replace(/\.alu$/, process.platform === 'win32' ? '.exe' : '');
+                
+                const aluExe = process.platform === 'win32' ? "alu.exe" : "alu";
+                const compileCmd = `${aluExe} build "${programPath}" -g`;
+
+                cp.exec(compileCmd, { cwd: workspacePath }, (err, stdout, stderr) => {
+                    if (err) {
+                        vscode.window.showErrorMessage(`Compilation failed: ${stderr}`);
+                        resolve(undefined);
+                        return;
+                    }
+
+                    // Replace the alu-debug config with a valid lldb config
+                    const lldbConfig: vscode.DebugConfiguration = {
+                        type: 'lldb',
+                        request: 'launch',
+                        name: config.name,
+                        program: outBin,
+                        args: config.args || [],
+                        cwd: config.cwd || workspacePath,
+                        stopOnEntry: config.stopOnEntry === true,
+                        terminal: 'integrated'
+                    };
+
+                    resolve(lldbConfig);
+                });
+            });
+        });
     }
 }
 

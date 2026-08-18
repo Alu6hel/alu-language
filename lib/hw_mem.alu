@@ -1,9 +1,0 @@
-// Slice 12: Core Hardware Definitions
-routine hw_mem_init {
-    // Slab and Bump allocator primitives
-    cap slab_pool = 0x300000..0x400000
-    cap bump_pool = 0x400000..0x500000
-    
-    // VGA text mode buffer mapping (0xB8000)
-    cap vga_buffer = 0xB8000..0xB8FA0
-}

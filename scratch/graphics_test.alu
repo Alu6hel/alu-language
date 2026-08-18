@@ -1,0 +1,1 @@
+extern routine vkCmdDrawMeshTasksIndirectCountEXT ( ptr<VkCommandBuffer_T> commandBuffer , ptr<VkBuffer_T> buffer , int offset , ptr<VkBuffer_T> countBuffer , int countBufferOffset , int maxDrawCount , int stride ) -> void ;

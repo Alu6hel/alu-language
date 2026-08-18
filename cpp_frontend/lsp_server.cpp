@@ -90,10 +90,13 @@ void validateDocument(const std::string& uri, const std::string& content) {
         state.analyzer->is_lsp_mode = true;
         state.analyzer->analyze(state.ast.get());
         
+        for (const auto& err : state.analyzer->errors) {
+            diagnostics.push_back(createDiagnostic(err.line, err.col, err.message));
+        }
+        
         Z3Verifier z3Verifier;
         z3Verifier.verify(state.ast.get());
     } catch (const std::exception& e) {
-
         std::cerr << "[DEBUG] Caught exception: " << e.what() << std::endl;
         std::string err = e.what();
         // Parse "test.alu:5:10: error: MSG" or "[ALU CXX] Compile Error in test.alu:5:10"

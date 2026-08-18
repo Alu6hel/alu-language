@@ -1,0 +1,10 @@
+// test_android — an ALU android-app
+// Scaffolded by alupm
+
+import "std/os/android/ui.alu";
+
+export routine main() -> int {
+    int w = alu_os_get_screen_width();
+    alu_os_show_toast("Welcome to test_android!");
+    return w;
+}

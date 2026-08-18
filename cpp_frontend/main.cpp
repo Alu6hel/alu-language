@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <cstdio>
 #include <memory>
 #include <unordered_set>
 #include <vector>
@@ -31,6 +32,7 @@ int main(int argc, char* argv[]) {
     std::string stdPath = ""; // Will be auto-detected if not set
     bool emit_debug_info = false;
     std::string opt_level = "-O3"; // Default optimization
+    bool use_static = false;
     
     auto hasExtension = [](const std::string& path, const std::string& ext) {
         if (path.length() >= ext.length()) {
@@ -51,6 +53,8 @@ int main(int argc, char* argv[]) {
             jniPackage = argv[++i];
         } else if (arg == "--std-path" && i + 1 < argc) {
             stdPath = argv[++i];
+        } else if (arg == "--static") {
+            use_static = true;
         } else if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3" || arg == "-Os" || arg == "-Oz") {
             opt_level = arg;
         } else if (arg == "-g" || arg == "--debug") {
@@ -109,6 +113,24 @@ int main(int argc, char* argv[]) {
         std::string target = inputFiles[0];
         std::string baseFilename = target.substr(0, target.find_last_of("."));
         std::cout << "[ALU CXX] Creating XCFramework for " << baseFilename << "..." << std::endl;
+        
+        std::cout << "[ALU CXX] Generating Objective-C Bridge (alu_ios_bridge.m)..." << std::endl;
+        std::ofstream iosBridge("alu_ios_bridge.m");
+        iosBridge << "#import <UIKit/UIKit.h>\n";
+        iosBridge << "extern \"C\" {\n";
+        iosBridge << "    int alu_os_get_screen_width() {\n";
+        iosBridge << "        return (int)[UIScreen mainScreen].bounds.size.width;\n";
+        iosBridge << "    }\n";
+        iosBridge << "    void alu_os_show_toast(const char* msg) {\n";
+        iosBridge << "        NSString *nmsg = [NSString stringWithUTF8String:msg];\n";
+        iosBridge << "        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@\"Toast\" message:nmsg preferredStyle:UIAlertControllerStyleAlert];\n";
+        iosBridge << "        [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:alert animated:YES completion:nil];\n";
+        iosBridge << "        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{\n";
+        iosBridge << "            [alert dismissViewControllerAnimated:YES completion:nil];\n";
+        iosBridge << "        });\n";
+        iosBridge << "    }\n";
+        iosBridge << "}\n";
+        iosBridge.close();
         
         std::string exeName = argv[0];
         
@@ -238,6 +260,13 @@ int main(int argc, char* argv[]) {
             SemanticAnalyzer semanticAnalyzer;
             semanticAnalyzer.analyze(ast.get());
             
+            if (!semanticAnalyzer.errors.empty()) {
+                for (const auto& err : semanticAnalyzer.errors) {
+                    std::cerr << "Semantic Error in " << err.file << ":" << err.line << ":" << err.col << ": " << err.message << std::endl;
+                }
+                return 1;
+            }
+            
             Z3Verifier z3Verifier;
             z3Verifier.verify(ast.get());
         } catch (const std::exception& e) {
@@ -261,12 +290,14 @@ int main(int argc, char* argv[]) {
         
         // --- JNI BRIDGE GENERATION PHASE --- //
         if (targetAndroid) {
-            std::cout << "[ALU CXX] Generating JNI Bridge for package: " << jniPackage << std::endl;
+            std::cout << "[ALU CXX] Generating JNI Bridge and NativeActivity for package: " << jniPackage << std::endl;
             std::ofstream jniFile("jni_bridge.cpp");
             jniFile << "#include <jni.h>\n";
             jniFile << "#include <string>\n";
             jniFile << "#include <vector>\n";
-            jniFile << "#include <iostream>\n\n";
+            jniFile << "#include <iostream>\n";
+            jniFile << "#include <pthread.h>\n";
+            jniFile << "#include <android/native_activity.h>\n\n";
             jniFile << "extern \"C\" {\n";
             for (const auto& decl : ast->declarations) {
                 if (auto rNode = dynamic_cast<RoutineNode*>(decl.get())) {
@@ -292,9 +323,13 @@ int main(int argc, char* argv[]) {
             std::string pkgUnderscore = jniPackage;
             for (char& c : pkgUnderscore) if (c == '.') c = '_';
             
+            std::string mainRoutineName = "";
             for (const auto& decl : ast->declarations) {
                 if (auto rNode = dynamic_cast<RoutineNode*>(decl.get())) {
                     if (rNode->isExported) {
+                        if (rNode->name == "main") {
+                            mainRoutineName = "main";
+                        }
                         jniFile << "extern \"C\" JNIEXPORT jint JNICALL\n";
                         jniFile << "Java_" << pkgUnderscore << "_AluBridge_" << rNode->name << "(JNIEnv *env, jobject thiz";
                         for (size_t i = 0; i < rNode->params.size(); ++i) {
@@ -347,8 +382,54 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
+            if (!mainRoutineName.empty()) {
+                jniFile << "extern \"C\" {\n";
+                jniFile << "    static JavaVM* g_vm = nullptr;\n";
+                jniFile << "    static jobject g_activity = nullptr;\n";
+                jniFile << "    static void* alu_thread_func(void*) {\n";
+                jniFile << "        " << mainRoutineName << "();\n";
+                jniFile << "        return nullptr;\n";
+                jniFile << "    }\n";
+                jniFile << "    JNIEXPORT void JNICALL ANativeActivity_onCreate(ANativeActivity* activity, void* savedState, size_t savedStateSize) {\n";
+                jniFile << "        g_vm = activity->vm;\n";
+                jniFile << "        JNIEnv* env;\n";
+                jniFile << "        activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6);\n";
+                jniFile << "        g_activity = env->NewGlobalRef(activity->clazz);\n";
+                jniFile << "        pthread_t thread;\n";
+                jniFile << "        pthread_create(&thread, nullptr, alu_thread_func, nullptr);\n";
+                jniFile << "    }\n";
+                jniFile << "    int alu_os_get_screen_width() {\n";
+                jniFile << "        if (!g_vm || !g_activity) return 0;\n";
+                jniFile << "        JNIEnv* env; g_vm->AttachCurrentThread(&env, nullptr);\n";
+                jniFile << "        jclass activityClass = env->GetObjectClass(g_activity);\n";
+                jniFile << "        jmethodID getResources = env->GetMethodID(activityClass, \"getResources\", \"()Landroid/content/res/Resources;\");\n";
+                jniFile << "        jobject resources = env->CallObjectMethod(g_activity, getResources);\n";
+                jniFile << "        jclass resourcesClass = env->GetObjectClass(resources);\n";
+                jniFile << "        jmethodID getDisplayMetrics = env->GetMethodID(resourcesClass, \"getDisplayMetrics\", \"()Landroid/util/DisplayMetrics;\");\n";
+                jniFile << "        jobject metrics = env->CallObjectMethod(resources, getDisplayMetrics);\n";
+                jniFile << "        jclass metricsClass = env->GetObjectClass(metrics);\n";
+                jniFile << "        jfieldID widthPixels = env->GetFieldID(metricsClass, \"widthPixels\", \"I\");\n";
+                jniFile << "        int width = env->GetIntField(metrics, widthPixels);\n";
+                jniFile << "        g_vm->DetachCurrentThread();\n";
+                jniFile << "        return width;\n";
+                jniFile << "    }\n";
+                jniFile << "    void alu_os_show_toast(char* msg) {\n";
+                // Note: Toast needs UI thread, but we'll leave it simple for the hook demonstration
+                jniFile << "        if (!g_vm || !g_activity) return;\n";
+                jniFile << "        JNIEnv* env; g_vm->AttachCurrentThread(&env, nullptr);\n";
+                jniFile << "        jclass toastClass = env->FindClass(\"android/widget/Toast\");\n";
+                jniFile << "        jmethodID makeText = env->GetStaticMethodID(toastClass, \"makeText\", \"(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;\");\n";
+                jniFile << "        jmethodID show = env->GetMethodID(toastClass, \"show\", \"()V\");\n";
+                jniFile << "        jstring jmsg = env->NewStringUTF(msg);\n";
+                jniFile << "        jobject toast = env->CallStaticObjectMethod(toastClass, makeText, g_activity, jmsg, 0);\n";
+                jniFile << "        env->CallVoidMethod(toast, show);\n";
+                jniFile << "        env->DeleteLocalRef(jmsg);\n";
+                jniFile << "        g_vm->DetachCurrentThread();\n";
+                jniFile << "    }\n";
+                jniFile << "}\n\n";
+            }
             jniFile.close();
-            std::cout << "[ALU CXX] JNI Bridge generated at jni_bridge.cpp" << std::endl;
+            std::cout << "[ALU CXX] JNI Bridge and NativeActivity generated at jni_bridge.cpp" << std::endl;
         }
 
         // --- BACKEND LINKER PHASE --- //
@@ -376,14 +457,40 @@ int main(int argc, char* argv[]) {
                 if (envNdk) {
                     resolvedNdk = envNdk;
                 } else {
+#if defined(_WIN32)
                     const char* localAppdata = std::getenv("LOCALAPPDATA");
                     if (localAppdata) {
                         resolvedNdk = std::string(localAppdata) + "\\Android\\Sdk\\ndk\\25.1.8937393"; // Default fallback
                     }
+#elif defined(__APPLE__)
+                    const char* home = std::getenv("HOME");
+                    if (home) {
+                        resolvedNdk = std::string(home) + "/Library/Android/sdk/ndk/25.1.8937393";
+                    }
+#else
+                    const char* home = std::getenv("HOME");
+                    if (home) {
+                        resolvedNdk = std::string(home) + "/Android/Sdk/ndk/25.1.8937393";
+                    }
+#endif
                 }
             }
-            std::string clangPath = resolvedNdk + "\\toolchains\\llvm\\prebuilt\\windows-x86_64\\bin\\aarch64-linux-android30-clang++";
-            compileCommand = clangPath + " -shared -fPIC -o " + outBinFilename + " " + outFilename + " jni_bridge.cpp std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp -lcrypto -lssl";
+
+#if defined(_WIN32)
+            std::string ndkHost = "windows-x86_64";
+            std::string sep = "\\";
+#elif defined(__APPLE__)
+            std::string ndkHost = "darwin-x86_64";
+            std::string sep = "/";
+#else
+            std::string ndkHost = "linux-x86_64";
+            std::string sep = "/";
+#endif
+            std::string clangPath = resolvedNdk + sep + "toolchains" + sep + "llvm" + sep + "prebuilt" + sep + ndkHost + sep + "bin" + sep + "aarch64-linux-android30-clang++";
+#ifdef _WIN32
+            clangPath += ".cmd";
+#endif
+            compileCommand = clangPath + " -shared -fPIC -o " + outBinFilename + " " + outFilename + " jni_bridge.cpp \"" + stdPath + "/std/string_backend.cpp\" \"" + stdPath + "/std/image_backend.cpp\" \"" + stdPath + "/std/yara_backend.cpp\" \"" + stdPath + "/std/net_backend.cpp\" \"" + stdPath + "/std/net_crypto.cpp\" \"" + stdPath + "/std/crypto_backend.cpp\" -landroid -llog";
         } else if (targetVulkan) {
             compileCommand = "llvm-spirv -o " + outBinFilename + " " + outFilename;
         } else if (targetMetal) {
@@ -394,7 +501,7 @@ int main(int argc, char* argv[]) {
             compileCommand = "clang -x ir " + outFilename + " -c -O3 -target aarch64-apple-ios -o " + objFile;
             outBinFilename = objFile;
 #else
-            compileCommand = "clang -x ir " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+            compileCommand = "clang -x ir " + outFilename + " \"" + stdPath + "/std/string_backend.cpp\" \"" + stdPath + "/std/image_backend.cpp\" \"" + stdPath + "/std/yara_backend.cpp\" \"" + stdPath + "/std/net_backend.cpp\" \"" + stdPath + "/std/net_crypto.cpp\" \"" + stdPath + "/std/crypto_backend.cpp\" \"" + stdPath + "/std/packet_backend.cpp\" -c -O3 -arch arm64 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
 #endif
         } else if (targetIosSim) {
             std::string arch = (targetTriple == "aarch64-apple-ios-simulator") ? "arm64" : "x86_64";
@@ -403,11 +510,14 @@ int main(int argc, char* argv[]) {
             compileCommand = "clang -x ir " + outFilename + " -c -O3 -target " + targetTriple + " -o " + objFile;
             outBinFilename = objFile;
 #else
-            compileCommand = "clang -x ir " + outFilename + " std/string_backend.cpp std/image_backend.cpp std/yara_backend.cpp std/net_backend.cpp std/net_crypto.cpp std/crypto_backend.cpp std/packet_backend.cpp -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
+            compileCommand = "clang -x ir " + outFilename + " \"" + stdPath + "/std/string_backend.cpp\" \"" + stdPath + "/std/image_backend.cpp\" \"" + stdPath + "/std/yara_backend.cpp\" \"" + stdPath + "/std/net_backend.cpp\" \"" + stdPath + "/std/net_crypto.cpp\" \"" + stdPath + "/std/crypto_backend.cpp\" \"" + stdPath + "/std/packet_backend.cpp\" -c -O3 -arch " + arch + " -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=12.0 -o " + objFile + " && libtool -static -o " + outBinFilename + " " + objFile;
 #endif
         } else {
             std::string opt_flag = emit_debug_info ? "-O0 -g" : opt_level;
             compileCommand = "clang++ " + opt_flag + " -o " + outBinFilename + " " + outFilename + " \"" + stdPath + "/std/fs_backend.cpp\" \"" + stdPath + "/std/net_backend.cpp\" \"" + stdPath + "/std/crypto_backend.cpp\" \"" + stdPath + "/std/string_backend.cpp\" \"" + stdPath + "/std/image_backend.cpp\" \"" + stdPath + "/std/thread_backend.cpp\" -lws2_32";
+            if (use_static) {
+                compileCommand += " -static -static-libgcc -static-libstdc++";
+            }
             for (size_t i = 1; i < inputFiles.size(); ++i) {
                 compileCommand += " \"" + inputFiles[i] + "\"";
             }
@@ -420,6 +530,100 @@ int main(int argc, char* argv[]) {
         
         if (result == 0) {
             std::cout << "[ALU CXX] Compilation Successful! Binary built at: " << outBinFilename << std::endl;
+            
+            // --- POST-BUILD DEPENDENCY BUNDLING --- //
+            if (!targetAndroid && !targetWasm && !targetVulkan && !targetMetal && !targetIos && !targetIosSim) {
+                std::cout << "[ALU CXX] Tracing dynamic dependencies..." << std::endl;
+                
+                std::string exeDir = outBinFilename;
+                size_t lastSlash = exeDir.find_last_of("/\\");
+                std::string outDir = (lastSlash == std::string::npos) ? "." : exeDir.substr(0, lastSlash);
+
+#ifdef _WIN32
+                std::string traceCmd = "llvm-objdump -p " + outBinFilename + " > " + baseFilename + "_deps.txt 2>nul";
+                if (std::system(traceCmd.c_str()) == 0) {
+                    std::ifstream depsFile(baseFilename + "_deps.txt");
+                    std::string line;
+                    std::vector<std::string> dlls;
+                    while (std::getline(depsFile, line)) {
+                        if (line.find("DLL Name:") != std::string::npos) {
+                            size_t pos = line.find("DLL Name:");
+                            std::string dll = line.substr(pos + 9);
+                            dll.erase(0, dll.find_first_not_of(" \t\r\n"));
+                            dll.erase(dll.find_last_not_of(" \t\r\n") + 1);
+                            
+                            std::string lower_dll = dll;
+                            std::transform(lower_dll.begin(), lower_dll.end(), lower_dll.begin(), ::tolower);
+                            if (lower_dll.find("kernel32") == std::string::npos &&
+                                lower_dll.find("user32") == std::string::npos &&
+                                lower_dll.find("advapi32") == std::string::npos &&
+                                lower_dll.find("msvcrt") == std::string::npos &&
+                                lower_dll.find("ws2_32") == std::string::npos &&
+                                lower_dll.find("bcrypt") == std::string::npos &&
+                                lower_dll.find("api-ms-win") == std::string::npos &&
+                                lower_dll.find("crypt32") == std::string::npos) {
+                                dlls.push_back(dll);
+                            }
+                        }
+                    }
+                    depsFile.close();
+                    
+                    for (const auto& dll : dlls) {
+                        std::string whereCmd = "where " + dll + " > " + baseFilename + "_where.txt 2>nul";
+                        if (std::system(whereCmd.c_str()) == 0) {
+                            std::ifstream whereFile(baseFilename + "_where.txt");
+                            std::string dllPath;
+                            if (std::getline(whereFile, dllPath)) {
+                                dllPath.erase(0, dllPath.find_first_not_of(" \t\r\n"));
+                                dllPath.erase(dllPath.find_last_not_of(" \t\r\n") + 1);
+                                std::string copyCmd = "copy /Y \"" + dllPath + "\" \"" + outDir + "\" >nul 2>nul";
+                                std::system(copyCmd.c_str());
+                                std::cout << "[ALU CXX] Bundled dependency: " << dll << std::endl;
+                            }
+                            whereFile.close();
+                        }
+                        std::remove((baseFilename + "_where.txt").c_str());
+                    }
+                }
+                std::remove((baseFilename + "_deps.txt").c_str());
+#else
+                std::string traceCmd = "ldd " + outBinFilename + " > " + baseFilename + "_deps.txt 2>/dev/null";
+                if (std::system(traceCmd.c_str()) == 0) {
+                    std::ifstream depsFile(baseFilename + "_deps.txt");
+                    std::string line;
+                    while (std::getline(depsFile, line)) {
+                        if (line.find("=>") != std::string::npos) {
+                            size_t start = line.find("=>") + 2;
+                            size_t end = line.find(" (0x");
+                            if (end != std::string::npos) {
+                                std::string soPath = line.substr(start, end - start);
+                                soPath.erase(0, soPath.find_first_not_of(" \t"));
+                                soPath.erase(soPath.find_last_not_of(" \t") + 1);
+                                
+                                if (!soPath.empty() && 
+                                    soPath.find("libc.so") == std::string::npos &&
+                                    soPath.find("libm.so") == std::string::npos &&
+                                    soPath.find("libdl.so") == std::string::npos &&
+                                    soPath.find("libpthread.so") == std::string::npos &&
+                                    soPath.find("ld-linux") == std::string::npos &&
+                                    soPath.find("/lib/") == std::string::npos &&
+                                    soPath.find("/usr/lib/") == std::string::npos) {
+                                    
+                                    std::string copyCmd = "cp \"" + soPath + "\" \"" + outDir + "/\"";
+                                    std::system(copyCmd.c_str());
+                                    
+                                    size_t lastSlashLib = soPath.find_last_of("/");
+                                    std::string libName = (lastSlashLib == std::string::npos) ? soPath : soPath.substr(lastSlashLib + 1);
+                                    std::cout << "[ALU CXX] Bundled dependency: " << libName << std::endl;
+                                }
+                            }
+                        }
+                    }
+                    depsFile.close();
+                }
+                std::remove((baseFilename + "_deps.txt").c_str());
+#endif
+            }
         } else {
             std::cerr << "[ALU CXX] Linker Error: Clang failed with exit code " << result << std::endl;
             return 1;

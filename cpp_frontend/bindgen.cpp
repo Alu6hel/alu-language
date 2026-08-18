@@ -483,7 +483,7 @@ std::string AluBindingEmitter::generateAluBindings(const CHeaderParser& parser, 
         out << indent << "// Preprocessor Constants\n";
         out << indent << "namespace Constants {\n";
         for (const auto& m : parser.getMacros()) {
-            out << indent << "    let " << m.name << ": int = " << m.value << ";\n";
+            out << indent << "    routine " << m.name << "() -> int { return " << m.value << "; }\n";
         }
         out << indent << "}\n\n";
     }
@@ -493,7 +493,7 @@ std::string AluBindingEmitter::generateAluBindings(const CHeaderParser& parser, 
         out << indent << "// Enum: " << e.name << "\n";
         out << indent << "namespace " << e.name << " {\n";
         for (const auto& mem : e.members) {
-            out << indent << "    let " << mem.name << ": int = " << mem.value << ";\n";
+            out << indent << "    routine " << mem.name << "() -> int { return " << mem.value << "; }\n";
         }
         out << indent << "}\n\n";
     }

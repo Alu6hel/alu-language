@@ -1,0 +1,3 @@
+@echo off
+echo Building test_android for Android...
+alu build src/App.alu --target=android

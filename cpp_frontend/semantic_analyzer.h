@@ -41,11 +41,20 @@ struct TypeInfo {
     std::string unit;
 };
 
+struct CompilationError {
+    std::string message;
+    std::string file;
+    int line;
+    int col;
+};
 
 class SemanticAnalyzer {
 public:
     std::vector<LSPSymbol> lsp_symbols;
+    std::vector<CompilationError> errors;
     bool is_lsp_mode = false;
+    
+    void reportError(const std::string& msg, int line = 0, int col = 0, const std::string& file = "");
 
 private:
     // Scope stacks: each element is one scope level (innermost is back())

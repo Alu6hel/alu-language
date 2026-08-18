@@ -24,7 +24,23 @@ static std::string stripWrapper(const std::string& type) {
 
 std::string LLVMCodeGen::getIR() const {
     std::string di_str = emit_debug_info ? "\n" + di_output.str() : "";
-    return ir_output.str() + "\n" + global_strings_output.str() + di_str;
+    
+    std::string opaque_str = "";
+    for(const auto& ot : opaque_types) { 
+        opaque_str += "%" + ot + " = type opaque\n"; 
+    }
+    
+    std::string ir_str = ir_output.str();
+    std::string target = "target triple = \"x86_64-pc-windows-msvc\"\n\n";
+    size_t pos = ir_str.find(target);
+    if (pos != std::string::npos) {
+        ir_str.insert(pos + target.length(), opaque_str + "\n");
+    } else {
+        ir_str = opaque_str + "\n" + ir_str;
+    }
+    return ir_str + "\n" + global_strings_output.str() + di_str;
+
+
 }
 
 int LLVMCodeGen::getDIFile(const std::string& filename) {
@@ -572,14 +588,14 @@ std::string LLVMCodeGen::getLLVMType(const std::string& type) {
         if (base == "double") return "double*";
         if (base == "string") return "i8**";
         if (base == "byte") return "i8*";
-        return "%" + getNamespacedName(base) + "*";
+        { std::string n = getNamespacedName(base); opaque_types.insert(n); return "%" + n + "*"; }
     }
     if (type.find("*") != std::string::npos) {
         std::string base = type;
         base.pop_back(); // remove *
         return getLLVMType(base) + "*";
     }
-    return "%" + getNamespacedName(type) + "*"; // Custom types are passed by reference
+    { std::string n = getNamespacedName(type); opaque_types.insert(n); return "%" + n + "*"; } // Custom types are passed by reference
 }
 
 std::string LLVMCodeGen::visit(VectorInitNode* node) {

@@ -1,0 +1,7 @@
+import "std/net.alu";
+
+routine main() -> int {
+    // Should be rejected by Z3 at compile-time because port > 0 is violated
+    int s = tcp_listen(0);
+    return s;
+}

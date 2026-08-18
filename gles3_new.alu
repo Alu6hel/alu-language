@@ -1,0 +1,29 @@
+// Auto-generated bindings for gl3.h
+
+struct __GLsync {
+    int opaque_dummy_field ;
+}
+
+extern routine glCheckFramebufferStatus ( int target ) -> int ;
+extern routine glCreateProgram ( ) -> int ;
+extern routine glCreateShader ( int type ) -> int ;
+extern routine glGetAttribLocation ( int program , string name ) -> int ;
+extern routine glGetError ( ) -> int ;
+extern routine glGetUniformLocation ( int program , string name ) -> int ;
+extern routine glIsBuffer ( int buffer ) -> int ;
+extern routine glIsEnabled ( int cap ) -> int ;
+extern routine glIsFramebuffer ( int framebuffer ) -> int ;
+extern routine glIsProgram ( int program ) -> int ;
+extern routine glIsRenderbuffer ( int renderbuffer ) -> int ;
+extern routine glIsShader ( int shader ) -> int ;
+extern routine glIsTexture ( int texture ) -> int ;
+extern routine glIsQuery ( int id ) -> int ;
+extern routine glUnmapBuffer ( int target ) -> int ;
+extern routine glIsVertexArray ( int array ) -> int ;
+extern routine glGetFragDataLocation ( int program , string name ) -> int ;
+extern routine glGetUniformBlockIndex ( int program , string uniformBlockName ) -> int ;
+extern routine glFenceSync ( int condition , int flags ) -> int ;
+extern routine glIsSync ( ptr< __GLsync > sync ) -> int ;
+extern routine glClientWaitSync ( ptr< __GLsync > sync , int flags , int timeout ) -> int ;
+extern routine glIsSampler ( int sampler ) -> int ;
+extern routine glIsTransformFeedback ( int id ) -> int ;
