@@ -1,0 +1,7 @@
+@requires(x == y)
+routine equal_args(int x, int y) -> int { return x; }
+routine main() -> int {
+    int x = 2;
+    int result = equal_args(1, x);
+    return 0;
+}

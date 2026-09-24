@@ -17,6 +17,15 @@
 // Module Linking is now handled by ModuleLinker (linker.h)
 
 int main(int argc, char* argv[]) {
+    if (argc == 2 && (std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h")) {
+        std::cout << "Usage: alu [build|check] <file.alu> [options]\n"
+                  << "  check             Parse, type-check, and verify without generating files\n"
+                  << "  build             Generate and link native code (default)\n"
+                  << "  --std-path PATH   Standard library search root\n"
+                  << "  --target=TRIPLE   Compilation target\n"
+                  << "  -O0..-O3, -Os, -Oz, -g\n";
+        return 0;
+    }
     if (argc < 2) {
         std::cerr << "Usage: alu_cxx <file.alu>" << std::endl;
         return 1;
@@ -59,7 +68,7 @@ int main(int argc, char* argv[]) {
             opt_level = arg;
         } else if (arg == "-g" || arg == "--debug") {
             emit_debug_info = true;
-        } else if (i == 1 && (arg == "install" || arg == "build" || arg == "bindgen" || arg == "pkg" || arg == "init" || arg == "run" || arg == "update" || arg == "list" || arg == "search" || arg == "publish" || arg == "clean")) {
+        } else if (i == 1 && (arg == "check" || arg == "install" || arg == "build" || arg == "bindgen" || arg == "pkg" || arg == "init" || arg == "run" || arg == "update" || arg == "list" || arg == "search" || arg == "publish" || arg == "clean")) {
             command = arg;
         } else {
             if (hasExtension(arg, ".o") || hasExtension(arg, ".obj") || hasExtension(arg, ".a") || hasExtension(arg, ".lib") || hasExtension(arg, ".c")) {
@@ -274,6 +283,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
+        if (command == "check") return 0;
+
         std::cout << "[ALU CXX] Ready for LLVM IR Translation." << std::endl;
         
         LLVMCodeGen codegen(targetTriple);

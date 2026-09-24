@@ -1,0 +1,6 @@
+routine consume(int value) -> int { return value; }
+routine main() -> int {
+    int values[2];
+    int result = consume(values[3]);
+    return 0;
+}

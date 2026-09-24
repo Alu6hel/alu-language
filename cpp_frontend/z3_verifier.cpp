@@ -13,8 +13,25 @@ static z3::expr ensure_bool(const z3::expr& e, z3::context& ctx) {
 }
 
 Z3Verifier::Z3Verifier() : solver(ctx), memory_ownership(ctx), var_alive(ctx) {
+    solver.set("timeout", 10000u);
     memory_ownership = ctx.constant("memory_ownership_0", ctx.array_sort(ctx.int_sort(), ctx.int_sort()));
     var_alive = ctx.constant("var_alive_0", ctx.array_sort(ctx.int_sort(), ctx.bool_sort()));
+}
+
+bool Z3Verifier::hasCounterexample() {
+    const auto result = solver.check();
+    if (result == z3::unknown) {
+        throw std::runtime_error(ErrorReporter::formatError(
+            "Z3 Verification Inconclusive: " + solver.reason_unknown(),
+            current_node ? current_node->file : "",
+            current_node ? current_node->line : 1,
+            current_node ? current_node->col : 1));
+    }
+    return result == z3::sat;
+}
+
+z3::expr Z3Verifier::freshInt(const std::string& prefix) {
+    return ctx.int_const(("__alu_" + prefix + "_" + std::to_string(next_symbol_id++)).c_str());
 }
 
 void Z3Verifier::pushScope() {
@@ -39,7 +56,7 @@ void Z3Verifier::popScope() {
                 // If it is still alive and owned, it's a leak!
                 solver.push();
                 solver.add(is_alive && state == 1);
-                if (solver.check() == z3::sat) {
+                if (hasCounterexample()) {
                     z3::model m = solver.get_model();
 //                     std::cerr << "\n[ALU CXX Z3 FATAL] Memory Leak Detected!" << std::endl;
 //                     std::cerr << "  Variable: '" << var_name << "' goes out of scope while still owning memory." << std::endl;
@@ -89,7 +106,7 @@ void Z3Verifier::verifyBounds(ASTNode* arrayExpr, ASTNode* indexExpr) {
             solver.push();
             solver.add(overflow_condition);
             
-            if (solver.check() == z3::sat) {
+            if (hasCounterexample()) {
                 z3::model m = solver.get_model();
 //                 std::cerr << "\n[ALU CXX Z3 FATAL] Mathematical Memory Bounds Violation Detected!" << std::endl;
 //                 std::cerr << "  Array: '" << varAccess->name << "'" << std::endl;
@@ -111,7 +128,7 @@ void Z3Verifier::verifyPointerValid(const z3::expr& ptrExpr, const std::string& 
     solver.push();
     solver.add(violation_condition);
     
-    if (solver.check() == z3::sat) {
+    if (hasCounterexample()) {
         z3::model m = solver.get_model();
 //         std::cerr << "\n[ALU CXX Z3 FATAL] Use-After-Free / Invalid Pointer Violation Detected!" << std::endl;
 //         std::cerr << "  Context: " << contextMsg << std::endl;
@@ -129,7 +146,7 @@ void Z3Verifier::verifyDivisionByZero(const z3::expr& denominator) {
     solver.push();
     solver.add(denominator == 0);
     
-    if (solver.check() == z3::sat) {
+    if (hasCounterexample()) {
         z3::model m = solver.get_model();
 //         std::cerr << "\n[ALU CXX Z3 FATAL] Mathematical Division by Zero Detected!" << std::endl;
 //         std::cerr << "  Z3 Counterexample: " << m << std::endl;
@@ -153,10 +170,12 @@ bool Z3Verifier::isStringLiteralAnnotation(ASTNode* expr) {
 // Evaluate an annotation expression, substituting formal parameter names
 // with the corresponding Z3 expressions from actual arguments.
 // Also handles the special variable "return" mapped to __return.
-z3::expr Z3Verifier::evalAnnotationExpr(ASTNode* expr, const std::vector<Parameter>& formal_params, const std::vector<ASTNode*>& actual_args) {
+z3::expr Z3Verifier::evalAnnotationExpr(ASTNode* expr, const std::vector<Parameter>& formal_params, const std::vector<ASTNode*>& actual_args, const std::vector<z3::expr>& actual_values) {
     pushScope();
     for (size_t i = 0; i < formal_params.size() && i < actual_args.size(); ++i) {
-        z3::expr arg_val = evalExpression(actual_args[i]);
+        // Values were evaluated in the caller scope, before any formal names
+        // can shadow variables in later arguments.
+        z3::expr arg_val = actual_values.at(i);
         declareVar(formal_params[i].name, arg_val);
         if (!formal_params[i].refinement_var.empty()) {
             declareVar(formal_params[i].refinement_var, arg_val);
@@ -237,6 +256,8 @@ void Z3Verifier::registerContractsInDeclarations(const std::vector<std::unique_p
 
 void Z3Verifier::verifyRequiresAtCallSite(const std::string& calleeName,
                                            const std::vector<std::unique_ptr<ASTNode>>& actual_args) {
+    std::vector<z3::expr> actual_values;
+    for (const auto& arg : actual_args) actual_values.push_back(evalExpression(arg.get()));
     auto it = routine_contracts.find(calleeName);
     if (it == routine_contracts.end()) return;
 
@@ -250,13 +271,13 @@ void Z3Verifier::verifyRequiresAtCallSite(const std::string& calleeName,
     for (ASTNode* req_expr : contract.requires_exprs) {
         if (isStringLiteralAnnotation(req_expr)) continue;
 
-        z3::expr precondition = evalAnnotationExpr(req_expr, contract.params, args_ptrs);
+        z3::expr precondition = evalAnnotationExpr(req_expr, contract.params, args_ptrs, actual_values);
         
         // To verify the precondition holds, check if its negation is satisfiable
         solver.push();
         solver.add(!precondition);
         
-        if (solver.check() == z3::sat) {
+        if (hasCounterexample()) {
             z3::model m = solver.get_model();
             std::cerr << "\n[ALU CXX Z3 FATAL] @requires Contract Violation Detected!" << std::endl;
             std::cerr << "  Function: '" << calleeName << "'" << std::endl;
@@ -282,9 +303,11 @@ void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr
 
     std::vector<std::unique_ptr<ASTNode>> param_exprs_mem;
     std::vector<ASTNode*> param_exprs;
+    std::vector<z3::expr> param_values;
     for (const auto& p : contract.params) {
         param_exprs_mem.push_back(std::make_unique<VarAccessNode>(p.name));
         param_exprs.push_back(param_exprs_mem.back().get());
+        param_values.push_back(getVar(p.name));
     }
 
     // Evaluate the return expression and bind it to __return
@@ -292,20 +315,21 @@ void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr
     if (returnExpr) {
         ret_val = evalExpression(returnExpr);
     }
-    declareVar("return", ret_val);
+    pushScope();
+    declareVar("__return", ret_val);
 
     // Check each @ensures clause
     for (ASTNode* ens_expr : contract.ensures_exprs) {
         // Skip string-literal annotations (documentation only)
         if (isStringLiteralAnnotation(ens_expr)) continue;
 
-        z3::expr postcondition = evalAnnotationExpr(ens_expr, contract.params, param_exprs);
+        z3::expr postcondition = evalAnnotationExpr(ens_expr, contract.params, param_exprs, param_values);
         
         // To verify the postcondition holds, check if its negation is satisfiable
         solver.push();
         solver.add(!postcondition);
         
-        if (solver.check() == z3::sat) {
+        if (hasCounterexample()) {
             z3::model m = solver.get_model();
 //             std::cerr << "\n[ALU CXX Z3 FATAL] @ensures Contract Violation Detected!" << std::endl;
 //             std::cerr << "  Function: '" << routine->name << "'" << std::endl;
@@ -318,6 +342,7 @@ void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr
         }
         solver.pop();
     }
+    popScope();
 }
 
 // --- Expression Evaluation ---
@@ -339,7 +364,7 @@ z3::expr Z3Verifier::evalExpression(ASTNode* expr) {
             z3::expr is_alive = z3::select(var_alive, ctx.int_val(v_id));
             solver.push();
             solver.add(!is_alive);
-            if (solver.check() == z3::sat) {
+            if (hasCounterexample()) {
                 z3::model m = solver.get_model();
 //                 std::cerr << "\n[ALU CXX Z3 FATAL] Use-After-Move Violation Detected!" << std::endl;
 //                 std::cerr << "  Variable: '" << varAccess->name << "' was moved or freed." << std::endl;
@@ -376,14 +401,13 @@ z3::expr Z3Verifier::evalExpression(ASTNode* expr) {
     }
     else if (auto arrIndex = dynamic_cast<ArrayIndexNode*>(expr)) {
         verifyBounds(arrIndex->arrayExpr.get(), arrIndex->indexExpr.get());
-        return ctx.int_const("dummy_arr_val");
+        return freshInt("array_value");
     } else if (auto deref = dynamic_cast<DereferenceNode*>(expr)) {
         z3::expr ptr_id = evalExpression(deref->expr.get());
         verifyPointerValid(ptr_id, "Dereference (Read)");
-        return ctx.int_const("deref_val");
+        return freshInt("deref_value");
     } else if (auto newAlloc = dynamic_cast<NewAllocationNode*>(expr)) {
-        static int alloc_id = 0;
-        z3::expr ptr_id = ctx.int_val(++alloc_id);
+        z3::expr ptr_id = ctx.int_val(next_alloc_id++);
         memory_ownership = z3::store(memory_ownership, ptr_id, ctx.int_val(1)); // 1 = Owned
         return ptr_id;
     }
@@ -391,11 +415,10 @@ z3::expr Z3Verifier::evalExpression(ASTNode* expr) {
         // Verify @requires at this call site
         verifyRequiresAtCallSite(funcCall->name, funcCall->args);
         // Return a symbolic value representing the function's return
-        std::string sym_name = funcCall->name + "_ret";
-        return ctx.int_const(sym_name.c_str());
+        return freshInt("call_result");
     }
     // Fallback to a dummy variable
-    return ctx.int_const("dummy");
+    return freshInt("unmodeled_value");
 }
 
 // --- Statement Checking ---
@@ -422,7 +445,7 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
                 
                 solver.push();
                 solver.add(!ref_cond);
-                if (solver.check() == z3::sat) {
+                if (hasCounterexample()) {
                     int l = current_node ? current_node->line : 1;
                     int c = current_node ? current_node->col : 1;
                     std::string f = current_node ? current_node->file : "";
@@ -487,6 +510,7 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
         bounds_table.insert({arrDecl->name, size_expr});
     } else if (auto arrAssign = dynamic_cast<ArrayAssignNode*>(stmt)) {
         verifyBounds(arrAssign->arrayExpr.get(), arrAssign->indexExpr.get());
+        evalExpression(arrAssign->valExpr.get());
     } else if (auto arrIndex = dynamic_cast<ArrayIndexNode*>(stmt)) {
         verifyBounds(arrIndex->arrayExpr.get(), arrIndex->indexExpr.get());
     } else if (auto ifNode = dynamic_cast<IfNode*>(stmt)) {
@@ -561,7 +585,7 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
         z3::expr cond = ensure_bool(evalExpression(assertNode->condition.get()), ctx);
         solver.push();
         solver.add(!cond);
-        if (solver.check() == z3::sat) {
+        if (hasCounterexample()) {
             z3::model m = solver.get_model();
 //             std::cerr << "\n[ALU CXX Z3 FATAL] Mathematical Business Logic Assertion Failed!" << std::endl;
 //             std::cerr << "  Z3 Counterexample: " << m << std::endl;
@@ -610,14 +634,16 @@ void Z3Verifier::checkRoutine(RoutineNode* node) {
         // Build param expressions for annotation evaluation
         std::vector<std::unique_ptr<ASTNode>> param_exprs_mem;
         std::vector<ASTNode*> param_exprs;
+        std::vector<z3::expr> param_values;
         for (const auto& p : contract.params) {
             param_exprs_mem.push_back(std::make_unique<VarAccessNode>(p.name));
             param_exprs.push_back(param_exprs_mem.back().get());
+            param_values.push_back(getVar(p.name));
         }
 
         for (ASTNode* req_expr : contract.requires_exprs) {
             if (isStringLiteralAnnotation(req_expr)) continue;
-            z3::expr precondition = ensure_bool(evalAnnotationExpr(req_expr, contract.params, param_exprs), ctx);
+            z3::expr precondition = ensure_bool(evalAnnotationExpr(req_expr, contract.params, param_exprs, param_values), ctx);
             solver.add(precondition); // ASSUME preconditions hold inside the routine
         }
     }
@@ -752,6 +778,6 @@ void Z3Verifier::verify(ProgramNode* ast) {
     // Second pass: verify bounds and contracts
     checkProgram(ast);
 
-    std::cerr << "[ALU CXX] Z3 Verification Passed: Mathematically proven memory safety." << std::endl;
+    std::cerr << "[ALU CXX] Z3 Verification Passed: checked obligations discharged within the verifier's current model." << std::endl;
 }
 

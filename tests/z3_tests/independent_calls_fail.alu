@@ -1,0 +1,5 @@
+routine identity(int value) -> int { return value; }
+routine main() -> int {
+    assert(identity(1) == identity(2));
+    return 0;
+}

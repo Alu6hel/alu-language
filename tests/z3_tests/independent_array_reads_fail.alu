@@ -1,0 +1,7 @@
+routine main() -> int {
+    int values[2];
+    values[0] = 1;
+    values[1] = 2;
+    assert(values[0] == values[1]);
+    return 0;
+}

@@ -1,0 +1,6 @@
+routine main() -> int {
+    int source[2];
+    int destination[2];
+    destination[0] = source[3];
+    return 0;
+}

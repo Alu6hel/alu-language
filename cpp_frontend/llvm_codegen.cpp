@@ -31,10 +31,11 @@ std::string LLVMCodeGen::getIR() const {
     }
     
     std::string ir_str = ir_output.str();
-    std::string target = "target triple = \"x86_64-pc-windows-msvc\"\n\n";
-    size_t pos = ir_str.find(target);
+    size_t pos = ir_str.find("target triple = ");
     if (pos != std::string::npos) {
-        ir_str.insert(pos + target.length(), opaque_str + "\n");
+        // Module directives must precede type declarations for every target.
+        pos = ir_str.find('\n', pos);
+        ir_str.insert(pos + 1, "\n" + opaque_str);
     } else {
         ir_str = opaque_str + "\n" + ir_str;
     }
@@ -565,7 +566,21 @@ std::string LLVMCodeGen::getLLVMType(const std::string& type) {
             std::string base = type.substr(pos1 + 1, pos2 - pos1 - 1);
             while (!base.empty() && base.back() == ' ') base.pop_back();
             while (!base.empty() && base.front() == ' ') base.erase(0, 1);
-            return getLLVMType(base) + "*";
+            std::string base_type = getLLVMType(base);
+
+            // User-defined values already lower to references (for example,
+            // Node -> %Node*).  Adding another pointer here would turn
+            // ptr<Node> into %Node**, even though `new Node` produces %Node*.
+            // Nested pointer wrappers and primitive pointers still need the
+            // additional level of indirection.
+            bool wrapped_base = base.find("ptr<") == 0 || base.find("managed<") == 0;
+            bool custom_reference = !base_type.empty() && base_type.front() == '%' &&
+                                    base_type.back() == '*';
+            if (custom_reference && !wrapped_base &&
+                base.find('*') == std::string::npos && base.find('[') == std::string::npos) {
+                return base_type;
+            }
+            return base_type + "*";
         }
     }
       if (clean_type == "int") return "i32";
@@ -588,14 +603,22 @@ std::string LLVMCodeGen::getLLVMType(const std::string& type) {
         if (base == "double") return "double*";
         if (base == "string") return "i8**";
         if (base == "byte") return "i8*";
-        { std::string n = getNamespacedName(base); opaque_types.insert(n); return "%" + n + "*"; }
+        {
+            std::string n = getNamespacedName(base);
+            if (defined_struct_types.find(n) == defined_struct_types.end()) opaque_types.insert(n);
+            return "%" + n + "*";
+        }
     }
     if (type.find("*") != std::string::npos) {
         std::string base = type;
         base.pop_back(); // remove *
         return getLLVMType(base) + "*";
     }
-    { std::string n = getNamespacedName(type); opaque_types.insert(n); return "%" + n + "*"; } // Custom types are passed by reference
+    {
+        std::string n = getNamespacedName(type);
+        if (defined_struct_types.find(n) == defined_struct_types.end()) opaque_types.insert(n);
+        return "%" + n + "*";
+    } // Custom types are passed by reference
 }
 
 std::string LLVMCodeGen::visit(VectorInitNode* node) {
@@ -1651,6 +1674,7 @@ void LLVMCodeGen::visit(StructDefNode* node) {
     if (!node->type_params.empty()) return; // skip templates
     std::string fields = "";
     std::string safeName = getNamespacedName(node->name);
+    defined_struct_types.insert(safeName);
     for (size_t i = 0; i < node->fields.size(); ++i) {
         std::string lltype = getLLVMType(node->fields[i].type);
         fields += lltype;
@@ -1659,6 +1683,11 @@ void LLVMCodeGen::visit(StructDefNode* node) {
         struct_field_types[safeName + "." + node->fields[i].name] = lltype;
         struct_field_indices[safeName + "." + node->fields[i].name] = i;
     }
+    // getLLVMType records custom types as opaque so external/forward-declared
+    // types remain valid.  This struct has a concrete definition, so emitting
+    // both declarations would produce invalid LLVM IR (`%T = type opaque`
+    // followed by `%T = type { ... }`).
+    opaque_types.erase(safeName);
     emit("%" + safeName + " = type { " + fields + " }\n");
 }
 

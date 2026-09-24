@@ -261,7 +261,9 @@ std::string Parser::parseTypeString() {
     if (currentToken().type == TokenType::TOK_LESS_THAN) {
         typeStr += "<";
         advance();
-        while (currentToken().type != TokenType::TOK_GREATER_THAN && currentToken().type != TokenType::TOK_EOF) {
+        while (currentToken().type != TokenType::TOK_GREATER_THAN &&
+               currentToken().type != TokenType::TOK_RSHIFT &&
+               currentToken().type != TokenType::TOK_EOF) {
             typeStr += parseTypeString();
             if (currentToken().type == TokenType::TOK_COMMA) {
                 typeStr += ",";
@@ -269,7 +271,16 @@ std::string Parser::parseTypeString() {
             }
         }
         typeStr += ">";
-        expect(TokenType::TOK_GREATER_THAN);
+        if (currentToken().type == TokenType::TOK_RSHIFT) {
+            // In a type, >> closes two generic arguments. Consume one > and
+            // leave the other for the enclosing type. Expression shifts remain
+            // a single token.
+            tokens[pos].type = TokenType::TOK_GREATER_THAN;
+            tokens[pos].value = ">";
+            tokens[pos].col++;
+        } else {
+            expect(TokenType::TOK_GREATER_THAN);
+        }
     }
     
     while (currentToken().type == TokenType::TOK_STAR || currentToken().type == TokenType::TOK_LBRACKET) {

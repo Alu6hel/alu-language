@@ -32,6 +32,8 @@ private:
     // Maps variable names to unique integer IDs for var_alive tracking
     std::unordered_map<std::string, int> var_to_id;
     int next_var_id = 1;
+    int next_alloc_id = 1;
+    unsigned next_symbol_id = 1;
 
     // Models the heap's memory state mapping Pointer IDs (Int) to State (Int)
     // 0 = Invalid/Freed, 1 = Owned, 3 = Borrowed
@@ -52,6 +54,8 @@ private:
     void popScope();
     void declareVar(const std::string& name, const z3::expr& val);
     z3::expr getVar(const std::string& name);
+    bool hasCounterexample();
+    z3::expr freshInt(const std::string& prefix);
     
     // AST Traversal
     void registerContracts(ProgramNode* node);
@@ -70,7 +74,7 @@ private:
     void verifyRequiresAtCallSite(const std::string& calleeName,
                                   const std::vector<std::unique_ptr<ASTNode>>& actual_args);
     void verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr);
-    z3::expr evalAnnotationExpr(ASTNode* expr, const std::vector<Parameter>& formal_params, const std::vector<ASTNode*>& actual_args);
+    z3::expr evalAnnotationExpr(ASTNode* expr, const std::vector<Parameter>& formal_params, const std::vector<ASTNode*>& actual_args, const std::vector<z3::expr>& actual_values);
     bool isStringLiteralAnnotation(ASTNode* expr);
 
 public:
