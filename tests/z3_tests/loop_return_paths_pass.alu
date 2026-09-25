@@ -1,0 +1,8 @@
+@ensures(return >= 0)
+routine example(int flag) -> int {
+    while (flag < 0) {
+        return 0;
+    }
+    return flag;
+}
+routine main() -> int { return example(1); }

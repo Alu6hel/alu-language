@@ -1,0 +1,8 @@
+routine example(int flag) -> int {
+    while (flag > 0) {
+        return 0;
+    }
+    assert(0 == 1);
+    return 0;
+}
+routine main() -> int { return example(0); }

@@ -1,0 +1,8 @@
+routine main() -> int {
+    int value = 0;
+    while (value < 65) {
+        value = value + 1;
+    }
+    assert(value == 65);
+    return 0;
+}

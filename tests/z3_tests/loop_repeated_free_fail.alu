@@ -1,0 +1,9 @@
+routine main() -> int {
+    int* pointer = new int;
+    int i = 0;
+    while (i < 2) {
+        free(pointer);
+        i = i + 1;
+    }
+    return 0;
+}

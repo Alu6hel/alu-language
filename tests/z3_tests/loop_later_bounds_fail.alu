@@ -1,0 +1,9 @@
+routine main() -> int {
+    int values[5];
+    int i = 0;
+    while (i <= 5) {
+        values[i] = i;
+        i = i + 1;
+    }
+    return 0;
+}

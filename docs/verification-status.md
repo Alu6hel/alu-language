@@ -31,6 +31,15 @@ regression checks, not an exhaustive proof. The source-build script also accepts
 - Each verifier worker owns its allocation counter; allocation does not race
   across parallel routines.
 - Solver unknown/timeout outcomes stop verification instead of being accepted.
+- Scalar assignments update their nearest lexical binding; branch joins merge
+  values, heap state, and variable liveness under the branch condition.
+- Shadowed variables have distinct identities and scoped array bounds. Return
+  paths stop contributing to later statements and check all active owning scopes.
+- While/for loops explore feasible iterations, including zero iterations and
+  early returns. Verification stops as inconclusive if execution may continue
+  beyond 64 iterations of one loop or 1024 total loop-body visits per routine.
+  This is bounded exploration of the existing abstract model, not an inductive
+  proof of arbitrary loops or a match to native machine-integer behavior.
 - Concrete structs are not also emitted as opaque LLVM types; ptr/managed struct
   wrappers agree with the pointer returned by struct allocation.
 
@@ -38,11 +47,15 @@ regression checks, not an exhaustive proof. The source-build script also accepts
 
 1. Specify integer overflow, division, pointer ownership, aliasing, lifetimes,
    exceptions, concurrency, and FFI semantics; align proofs with native behavior.
-2. Model control flow soundly: unique assignment versions, lexical scope and
-   branch merges, early returns, loop invariants or sound loop analysis.
+2. Extend control-flow coverage beyond the tested scalar assignments, branches,
+   scopes, returns, and bounded loops. Add inductive invariants for loops that
+   exceed the exploration budget, and validate aggregate/alias state transitions.
 3. Complete coverage across namespaces, templates, casts, unsafe blocks, method
    calls, exceptions, all pointer syntaxes, and all AST node types. Unsupported
    proof obligations must produce an explicit diagnostic.
+   The current lexer/parser also mishandles C-style logical operators and
+   boolean literal keywords; scalar regression fixtures use separate assertions
+   and comparison expressions until those syntax paths are corrected.
 4. Prove ownership transfer and release behavior through the generated runtime,
    including managed fields, aggregates, exceptions, and concurrency. Validate
    with sanitizers, adversarial programs, and differential tests.

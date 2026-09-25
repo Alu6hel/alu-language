@@ -1,0 +1,9 @@
+routine example(int count) -> int {
+    int i = 0;
+    while (i < count) {
+        i = i + 1;
+    }
+    assert(i >= 0);
+    return i;
+}
+routine main() -> int { return example(1); }

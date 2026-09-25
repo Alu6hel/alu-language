@@ -1,0 +1,11 @@
+routine main() -> int {
+    int i = 0;
+    while (i < 3) {
+        int* pointer = new int;
+        *pointer = i;
+        free(pointer);
+        i = i + 1;
+    }
+    assert(i == 3);
+    return 0;
+}

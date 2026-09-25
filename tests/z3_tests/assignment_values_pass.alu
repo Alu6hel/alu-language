@@ -1,0 +1,9 @@
+routine main() -> int {
+ int index = 0;
+ index = index + 1;
+ index = index + 1;
+ assert(index == 2);
+ int values[3];
+ values[index] = 7;
+ return 0;
+}

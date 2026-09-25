@@ -1,0 +1,8 @@
+routine example(int flag) -> int {
+ int values[2];
+ int index = 0;
+ if (flag > 0) { index = 4; }
+ values[index] = 7;
+ return 0;
+}
+routine main() -> int { return example(1); }

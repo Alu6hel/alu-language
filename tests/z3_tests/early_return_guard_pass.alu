@@ -1,0 +1,6 @@
+@ensures(return >= 0)
+routine example(int value) -> int {
+ if (value < 0) { return 0; }
+ return value;
+}
+routine main() -> int { return example(1); }

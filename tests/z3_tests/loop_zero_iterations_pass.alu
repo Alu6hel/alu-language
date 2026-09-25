@@ -1,0 +1,9 @@
+routine main() -> int {
+    int value = 7;
+    while (value < 0) {
+        value = 0;
+        assert(0 == 1);
+    }
+    assert(value == 7);
+    return 0;
+}

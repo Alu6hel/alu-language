@@ -42,7 +42,10 @@ build/native/alu --help
 
 `check` parses, analyzes, and runs the verifier without generating or linking
 files. It returns zero when the current checks pass and nonzero on failure.
-Solver timeouts or unknown outcomes fail verification. For native code generation,
+Solver timeouts, unknown outcomes, or exhausted loop proof budgets stop
+verification as inconclusive. Loops currently allow at most 64 iterations per
+loop and 1024 loop-body visits per routine when explored by the verifier.
+For native code generation,
 use `alu build example.alu`; runtime linking currently requires further platform
 work. LLVM assembly tests are independent of that runtime.
 

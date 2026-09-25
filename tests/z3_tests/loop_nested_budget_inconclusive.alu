@@ -1,0 +1,10 @@
+routine main() -> int {
+    int total = 0;
+    for (int i = 0; i < 33; i = i + 1) {
+        for (int j = 0; j < 33; j = j + 1) {
+            total = total + 1;
+        }
+    }
+    assert(total == 1089);
+    return 0;
+}

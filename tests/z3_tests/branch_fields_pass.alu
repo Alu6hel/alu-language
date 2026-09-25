@@ -1,0 +1,16 @@
+struct Record { int value; bool ready; }
+routine example(int flag) -> int {
+    Record record;
+    if (flag > 0) {
+        record.value = 1;
+        record.ready = 1 == 1;
+    } else {
+        record.value = 2;
+        record.ready = 1 == 1;
+    }
+    assert(record.value >= 1);
+    assert(record.value <= 2);
+    assert(record.ready);
+    return 0;
+}
+routine main() -> int { return example(1); }

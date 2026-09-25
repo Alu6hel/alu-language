@@ -1,0 +1,10 @@
+routine example(int flag, int other) -> int {
+ int index = 3;
+ if (flag > 0) {
+   if (other > 0) { index = 1; } else { index = 2; }
+ } else { index = 0; }
+ assert(index >= 0);
+ assert(index < 3);
+ return 0;
+}
+routine main() -> int { return example(1, 1); }

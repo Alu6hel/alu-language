@@ -1,0 +1,7 @@
+routine main() -> int {
+ int values[2];
+ int index = 0;
+ index = 4;
+ values[index] = 7;
+ return 0;
+}

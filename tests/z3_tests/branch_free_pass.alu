@@ -1,0 +1,6 @@
+routine example(int flag) -> int {
+ int* pointer = new int;
+ if (flag > 0) { free(pointer); } else { free(pointer); }
+ return 0;
+}
+routine main() -> int { return example(1); }

@@ -12,13 +12,14 @@ static z3::expr ensure_bool(const z3::expr& e, z3::context& ctx) {
     return e;
 }
 
-Z3Verifier::Z3Verifier() : solver(ctx), memory_ownership(ctx), var_alive(ctx) {
+Z3Verifier::Z3Verifier() : solver(ctx), memory_ownership(ctx), var_alive(ctx), path_guard(ctx.bool_val(true)) {
     solver.set("timeout", 10000u);
     memory_ownership = ctx.constant("memory_ownership_0", ctx.array_sort(ctx.int_sort(), ctx.int_sort()));
     var_alive = ctx.constant("var_alive_0", ctx.array_sort(ctx.int_sort(), ctx.bool_sort()));
 }
 
 bool Z3Verifier::hasCounterexample() {
+    solver.add(path_guard);
     const auto result = solver.check();
     if (result == z3::unknown) {
         throw std::runtime_error(ErrorReporter::formatError(
@@ -31,54 +32,103 @@ bool Z3Verifier::hasCounterexample() {
 }
 
 z3::expr Z3Verifier::freshInt(const std::string& prefix) {
-    return ctx.int_const(("__alu_" + prefix + "_" + std::to_string(next_symbol_id++)).c_str());
+    return z3::expr(ctx, Z3_mk_fresh_const(ctx, prefix.c_str(), ctx.int_sort()));
 }
 
 void Z3Verifier::pushScope() {
+    saved_var_ids.push_back(var_to_id);
+    saved_bounds.push_back(bounds_table);
+    scope_var_ids.emplace_back();
     scope_stack.emplace_back();
     owned_pointers_stack.emplace_back();
     solver.push();
 }
 
-void Z3Verifier::popScope() {
-    // Memory Leak Detection
-    if (!owned_pointers_stack.empty() && !scope_stack.empty()) {
-        auto& current_pointers = owned_pointers_stack.back();
-        auto& current_vars = scope_stack.back();
-        for (const auto& var_name : current_pointers) {
-            if (current_vars.count(var_name) && var_to_id.count(var_name)) {
-                z3::expr ptr_id = current_vars.at(var_name);
-                int v_id = var_to_id[var_name];
-                
-                z3::expr is_alive = z3::select(var_alive, ctx.int_val(v_id));
-                z3::expr state = z3::select(memory_ownership, ptr_id);
-                
-                // If it is still alive and owned, it's a leak!
-                solver.push();
-                solver.add(is_alive && state == 1);
-                if (hasCounterexample()) {
-                    z3::model m = solver.get_model();
-//                     std::cerr << "\n[ALU CXX Z3 FATAL] Memory Leak Detected!" << std::endl;
-//                     std::cerr << "  Variable: '" << var_name << "' goes out of scope while still owning memory." << std::endl;
-//                     std::cerr << "  Z3 Counterexample: " << m << std::endl;
-                    int l = current_node ? current_node->line : 1;
-                    int c = current_node ? current_node->col : 1;
-                    std::string f = current_node ? current_node->file : "";
-                    throw std::runtime_error(ErrorReporter::formatError("Z3 Verification Failed", f, l, c));
-                }
-                solver.pop();
+void Z3Verifier::checkLeaks(size_t first_scope) {
+    for (size_t scope = first_scope; scope < scope_stack.size(); ++scope) {
+        for (const auto& name : owned_pointers_stack[scope]) {
+            const auto value = scope_stack[scope].find(name);
+            const auto id = scope_var_ids[scope].find(name);
+            if (value == scope_stack[scope].end() || id == scope_var_ids[scope].end()) continue;
+            solver.push();
+            solver.add(z3::select(var_alive, ctx.int_val(id->second)) &&
+                       z3::select(memory_ownership, value->second) == 1);
+            if (hasCounterexample()) {
+                throw std::runtime_error(ErrorReporter::formatError(
+                    "Z3 Verification Failed: owned memory leaks at scope exit: " + name,
+                    current_node ? current_node->file : "",
+                    current_node ? current_node->line : 1,
+                    current_node ? current_node->col : 1));
             }
+            solver.pop();
         }
     }
+}
+
+void Z3Verifier::popScope() {
+    checkLeaks(scope_stack.size() - 1);
     owned_pointers_stack.pop_back();
     scope_stack.pop_back();
+    scope_var_ids.pop_back();
+    var_to_id = std::move(saved_var_ids.back());
+    saved_var_ids.pop_back();
+    bounds_table = std::move(saved_bounds.back());
+    saved_bounds.pop_back();
     solver.pop();
 }
 
 void Z3Verifier::declareVar(const std::string& name, const z3::expr& val) {
-    if (!scope_stack.empty()) {
-        scope_stack.back().insert({name, val});
+    if (!scope_stack.empty()) scope_stack.back().insert_or_assign(name, val);
+}
+
+void Z3Verifier::assignVar(const std::string& name, const z3::expr& val) {
+    for (auto scope = scope_stack.rbegin(); scope != scope_stack.rend(); ++scope) {
+        auto found = scope->find(name);
+        if (found != scope->end()) {
+            found->second = val;
+            return;
+        }
     }
+    declareVar(name, val);
+}
+
+Z3Verifier::FlowState Z3Verifier::saveFlow() const {
+    return {scope_stack, owned_pointers_stack, memory_ownership, var_alive, path_guard};
+}
+
+void Z3Verifier::restoreFlow(const FlowState& state) {
+    scope_stack = state.variables;
+    owned_pointers_stack = state.owners;
+    memory_ownership = state.heap;
+    var_alive = state.liveness;
+    path_guard = state.path;
+}
+
+void Z3Verifier::mergeFlow(const z3::expr& condition, const FlowState& then_state,
+                           const FlowState& else_state) {
+    scope_stack = then_state.variables;
+    owned_pointers_stack = then_state.owners;
+    for (size_t i = 0; i < scope_stack.size(); ++i) {
+        // Fields may first be assigned in either branch. Include both sets,
+        // leaving an uninitialized branch unconstrained.
+        for (const auto& binding : else_state.variables[i]) {
+            if (!scope_stack[i].count(binding.first)) {
+                scope_stack[i].emplace(binding.first, z3::expr(ctx,
+                    Z3_mk_fresh_const(ctx, "uninitialized_field", binding.second.get_sort())));
+            }
+        }
+        for (auto& binding : scope_stack[i]) {
+            auto other = else_state.variables[i].find(binding.first);
+            z3::expr else_value = other == else_state.variables[i].end()
+                ? z3::expr(ctx, Z3_mk_fresh_const(ctx, "uninitialized_field", binding.second.get_sort()))
+                : other->second;
+            binding.second = z3::ite(condition, binding.second, else_value).simplify();
+        }
+        owned_pointers_stack[i].insert(else_state.owners[i].begin(), else_state.owners[i].end());
+    }
+    memory_ownership = z3::ite(condition, then_state.heap, else_state.heap);
+    var_alive = z3::ite(condition, then_state.liveness, else_state.liveness);
+    path_guard = (then_state.path || else_state.path).simplify();
 }
 
 z3::expr Z3Verifier::getVar(const std::string& name) {
@@ -294,7 +344,7 @@ void Z3Verifier::verifyRequiresAtCallSite(const std::string& calleeName,
 
 // --- Postcondition Verification at Return Statements ---
 
-void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr) {
+void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, const z3::expr& ret_val) {
     auto it = routine_contracts.find(routine->name);
     if (it == routine_contracts.end()) return;
 
@@ -310,11 +360,7 @@ void Z3Verifier::verifyEnsuresAtReturn(RoutineNode* routine, ASTNode* returnExpr
         param_values.push_back(getVar(p.name));
     }
 
-    // Evaluate the return expression and bind it to __return
-    z3::expr ret_val = ctx.int_const("__return");
-    if (returnExpr) {
-        ret_val = evalExpression(returnExpr);
-    }
+    // The return expression was evaluated once, before postcondition binding.
     pushScope();
     declareVar("__return", ret_val);
 
@@ -421,158 +467,168 @@ z3::expr Z3Verifier::evalExpression(ASTNode* expr) {
     return freshInt("unmodeled_value");
 }
 
+// Explore every feasible iteration up to a bounded proof budget. Exhaustion
+// is inconclusive, never a proof obtained by ignoring later iterations.
+void Z3Verifier::checkLoop(ASTNode* condition,
+                           const std::vector<std::unique_ptr<ASTNode>>& body,
+                           ASTNode* update) {
+    FlowState exits = saveFlow();
+    exits.path = ctx.bool_val(false);
+    for (size_t iteration = 0;; ++iteration) {
+        if (path_guard.is_false()) {
+            restoreFlow(exits);
+            return;
+        }
+        const z3::expr cond = condition
+            ? ensure_bool(evalExpression(condition), ctx) : ctx.bool_val(true);
+        const FlowState before = saveFlow();
+        FlowState exit_state = before;
+        exit_state.path = (before.path && !cond).simplify();
+        mergeFlow(exit_state.path, exit_state, exits);
+        exits = saveFlow();
+        restoreFlow(before);
+        path_guard = (before.path && cond).simplify();
+
+        solver.push();
+        const bool reachable = hasCounterexample();
+        solver.pop();
+        if (!reachable) {
+            restoreFlow(exits);
+            return;
+        }
+        if (iteration >= 64 || loop_steps >= 1024) {
+            throw std::runtime_error(ErrorReporter::formatError(
+                "Z3 Verification Inconclusive: loop proof budget exhausted (64 iterations per loop, 1024 per routine)",
+                current_node ? current_node->file : "",
+                current_node ? current_node->line : 1,
+                current_node ? current_node->col : 1));
+        }
+        ++loop_steps;
+        pushScope();
+        for (const auto& statement : body) checkStatement(statement.get());
+        popScope();
+        if (update) checkStatement(update);
+    }
+}
+
 // --- Statement Checking ---
 
 void Z3Verifier::checkStatement(ASTNode* stmt) {
+    if (path_guard.is_false()) return;
     ASTNode* old_node = current_node;
     current_node = stmt;
     if (auto vardecl = dynamic_cast<VarDeclNode*>(stmt)) {
-        int v_id = next_var_id++;
-        var_to_id[vardecl->name] = v_id;
-        var_alive = z3::store(var_alive, ctx.int_val(v_id), ctx.bool_val(true));
-        
-        z3::expr var = ctx.int_const(vardecl->name.c_str());
-        declareVar(vardecl->name, var);
-        
-        if (vardecl->initializer) {
-            z3::expr init_val = evalExpression(vardecl->initializer.get());
-            solver.add(var == init_val);
-            
-            if (vardecl->refinement_expr) {
-                pushScope();
-                declareVar(vardecl->refinement_var, init_val);
-                z3::expr ref_cond = ensure_bool(evalExpression(vardecl->refinement_expr.get()), ctx);
-                
-                solver.push();
-                solver.add(!ref_cond);
-                if (hasCounterexample()) {
-                    int l = current_node ? current_node->line : 1;
-                    int c = current_node ? current_node->col : 1;
-                    std::string f = current_node ? current_node->file : "";
-                    throw std::runtime_error(ErrorReporter::formatError("Z3 Verification Failed: Refinement constraint not satisfied on assignment", f, l, c));
-                }
-                solver.pop();
-                popScope();
-                
-                pushScope();
-                declareVar(vardecl->refinement_var, var);
-                z3::expr var_cond = ensure_bool(evalExpression(vardecl->refinement_expr.get()), ctx);
-                popScope();
-                solver.add(var_cond);
-            }
-            
-            if (auto rhs_var = dynamic_cast<VarAccessNode*>(vardecl->initializer.get())) {
-                bool is_ptr = (!vardecl->varType.empty() && vardecl->varType.back() == '*');
-                if (is_ptr && var_to_id.count(rhs_var->name)) {
-                    // Move semantics: transfer ownership
-                    var_alive = z3::store(var_alive, ctx.int_val(var_to_id[rhs_var->name]), ctx.bool_val(false));
+        // Bind the value expression itself: successive assignments must not add
+        // contradictory equalities to one reused symbol and prove everything.
+        z3::expr value = vardecl->initializer
+            ? evalExpression(vardecl->initializer.get()) : freshInt(vardecl->name);
+        const bool is_pointer = !vardecl->varType.empty() && vardecl->varType.back() == '*';
+        if (is_pointer && vardecl->initializer) {
+            if (auto source = dynamic_cast<VarAccessNode*>(vardecl->initializer.get())) {
+                if (var_to_id.count(source->name)) {
+                    var_alive = z3::store(var_alive, ctx.int_val(var_to_id.at(source->name)), ctx.bool_val(false));
                 }
             }
         }
-        
-        if (!vardecl->varType.empty() && vardecl->varType.back() == '*') {
-            if (!owned_pointers_stack.empty()) {
-                owned_pointers_stack.back().insert(vardecl->name);
+
+        int id = next_var_id++;
+        var_to_id[vardecl->name] = id;
+        scope_var_ids.back()[vardecl->name] = id;
+        var_alive = z3::store(var_alive, ctx.int_val(id), ctx.bool_val(true));
+        declareVar(vardecl->name, value);
+
+        if (vardecl->refinement_expr && vardecl->initializer) {
+            pushScope();
+            declareVar(vardecl->refinement_var, value);
+            z3::expr constraint = ensure_bool(evalExpression(vardecl->refinement_expr.get()), ctx);
+            solver.push();
+            solver.add(!constraint);
+            if (hasCounterexample()) {
+                throw std::runtime_error(ErrorReporter::formatError(
+                    "Z3 Verification Failed: Refinement constraint not satisfied on assignment",
+                    stmt->file, stmt->line, stmt->col));
             }
+            solver.pop();
+            popScope();
         }
+        if (is_pointer) owned_pointers_stack.back().insert(vardecl->name);
     } else if (auto memberAssign = dynamic_cast<MemberAssignNode*>(stmt)) {
-        z3::expr new_val = evalExpression(memberAssign->expr.get());
-        std::string full_name = memberAssign->objectName + "_" + memberAssign->fieldName;
-        z3::expr var = ctx.int_const((full_name + "_new").c_str());
-        declareVar(full_name, var);
-        solver.add(var == new_val);
-    } else if (auto varassign = dynamic_cast<VarAssignNode*>(stmt)) {
-        z3::expr new_val = evalExpression(varassign->expr.get());
-        
-        // Check for move
-        if (auto rhs_var = dynamic_cast<VarAccessNode*>(varassign->expr.get())) {
-            bool rhs_is_owned = false;
-            for (const auto& s : owned_pointers_stack) {
-                if (s.count(rhs_var->name)) rhs_is_owned = true;
+        z3::expr value = evalExpression(memberAssign->expr.get());
+        const std::string name = memberAssign->objectName + "_" + memberAssign->fieldName;
+        // A field belongs to the object's declaring scope, not the branch in
+        // which that field happened to be written.
+        for (auto scope = scope_stack.rbegin(); scope != scope_stack.rend(); ++scope) {
+            if (scope->count(memberAssign->objectName)) {
+                scope->insert_or_assign(name, value);
+                break;
             }
-            if (rhs_is_owned && var_to_id.count(rhs_var->name)) {
-                var_alive = z3::store(var_alive, ctx.int_val(var_to_id[rhs_var->name]), ctx.bool_val(false));
-                if (!owned_pointers_stack.empty()) {
-                    owned_pointers_stack.back().insert(varassign->name); // LHS becomes owned
+        }
+    } else if (auto varassign = dynamic_cast<VarAssignNode*>(stmt)) {
+        z3::expr value = evalExpression(varassign->expr.get());
+        if (auto source = dynamic_cast<VarAccessNode*>(varassign->expr.get())) {
+            bool owned_source = false;
+            for (size_t i = scope_stack.size(); i-- > 0;) {
+                if (scope_stack[i].count(source->name)) {
+                    owned_source = owned_pointers_stack[i].count(source->name) != 0;
+                    break;
+                }
+            }
+            if (owned_source && var_to_id.count(source->name)) {
+                var_alive = z3::store(var_alive, ctx.int_val(var_to_id.at(source->name)), ctx.bool_val(false));
+                for (size_t i = scope_stack.size(); i-- > 0;) {
+                    if (scope_stack[i].count(varassign->name)) {
+                        owned_pointers_stack[i].insert(varassign->name);
+                        break;
+                    }
                 }
             }
         }
-        
-        z3::expr var = ctx.int_const((varassign->name + "_new").c_str()); // SSA form approach simplified
-        declareVar(varassign->name, var);
-        solver.add(var == new_val);
-        
+        assignVar(varassign->name, value);
         if (var_to_id.count(varassign->name)) {
-            var_alive = z3::store(var_alive, ctx.int_val(var_to_id[varassign->name]), ctx.bool_val(true));
+            var_alive = z3::store(var_alive, ctx.int_val(var_to_id.at(varassign->name)), ctx.bool_val(true));
         }
     } else if (auto arrDecl = dynamic_cast<ArrayDeclNode*>(stmt)) {
         z3::expr size_expr = evalExpression(arrDecl->sizeExpr.get());
-        bounds_table.insert({arrDecl->name, size_expr});
+        bounds_table.insert_or_assign(arrDecl->name, size_expr);
     } else if (auto arrAssign = dynamic_cast<ArrayAssignNode*>(stmt)) {
         verifyBounds(arrAssign->arrayExpr.get(), arrAssign->indexExpr.get());
         evalExpression(arrAssign->valExpr.get());
     } else if (auto arrIndex = dynamic_cast<ArrayIndexNode*>(stmt)) {
         verifyBounds(arrIndex->arrayExpr.get(), arrIndex->indexExpr.get());
     } else if (auto ifNode = dynamic_cast<IfNode*>(stmt)) {
-        z3::expr mem_before = memory_ownership;
+        const z3::expr condition = ensure_bool(evalExpression(ifNode->condition.get()), ctx);
+        const FlowState before = saveFlow();
 
         pushScope();
-        z3::expr cond = ensure_bool(evalExpression(ifNode->condition.get()), ctx);
-        solver.add(cond);
-        for (const auto& s : ifNode->then_body) checkStatement(s.get());
-        z3::expr mem_then = memory_ownership;
+        path_guard = (before.path && condition).simplify();
+        for (const auto& statement : ifNode->then_body) checkStatement(statement.get());
         popScope();
-        
-        z3::expr mem_else = mem_before;
-        if (!ifNode->else_body.empty()) {
-            pushScope();
-            solver.add(!cond);
-            memory_ownership = mem_before;
-            for (const auto& s : ifNode->else_body) checkStatement(s.get());
-            mem_else = memory_ownership;
-            popScope();
-        }
+        const FlowState then_state = saveFlow();
 
-        memory_ownership = z3::ite(cond, mem_then, mem_else);
+        restoreFlow(before);
+        pushScope();
+        path_guard = (before.path && !condition).simplify();
+        for (const auto& statement : ifNode->else_body) checkStatement(statement.get());
+        popScope();
+        const FlowState else_state = saveFlow();
+
+        mergeFlow(condition, then_state, else_state);
     } else if (auto whileNode = dynamic_cast<WhileNode*>(stmt)) {
-        pushScope();
-        z3::expr mem_before = memory_ownership;
-        // Just add the condition, assuming loop variables could be anything satisfying it
-        z3::expr cond = ensure_bool(evalExpression(whileNode->condition.get()), ctx);
-        solver.add(cond);
-        for (const auto& s : whileNode->body) checkStatement(s.get());
-        
-        // Merge states: the loop could execute 0 times, or multiple times.
-        memory_ownership = z3::ite(cond, memory_ownership, mem_before);
-        popScope();
+        checkLoop(whileNode->condition.get(), whileNode->body);
     } else if (auto forNode = dynamic_cast<ForNode*>(stmt)) {
         pushScope();
         if (forNode->init) checkStatement(forNode->init.get());
-        
-        z3::expr mem_before = memory_ownership;
-        
-        if (forNode->condition) {
-            z3::expr cond = ensure_bool(evalExpression(forNode->condition.get()), ctx);
-            solver.add(cond);
-            
-            for (const auto& s : forNode->body) checkStatement(s.get());
-            if (forNode->update) checkStatement(forNode->update.get());
-            
-            memory_ownership = z3::ite(cond, memory_ownership, mem_before);
-        } else {
-            for (const auto& s : forNode->body) checkStatement(s.get());
-            if (forNode->update) checkStatement(forNode->update.get());
-        }
-        
+        checkLoop(forNode->condition.get(), forNode->body, forNode->update.get());
         popScope();
     } else if (auto returnNode = dynamic_cast<ReturnNode*>(stmt)) {
-        if (returnNode->expr) {
-            evalExpression(returnNode->expr.get());
-        }
+        const z3::expr value = returnNode->expr
+            ? evalExpression(returnNode->expr.get()) : freshInt("void_return");
         // Verify @ensures postconditions at this return point
         if (current_routine) {
-            verifyEnsuresAtReturn(current_routine, returnNode->expr.get());
+            verifyEnsuresAtReturn(current_routine, value);
         }
+        checkLeaks(0);
+        path_guard = ctx.bool_val(false);
     } else if (auto funcCall = dynamic_cast<FuncCallNode*>(stmt)) {
         // Verify @requires at this call site (statement-level function call)
         verifyRequiresAtCallSite(funcCall->name, funcCall->args);
@@ -596,7 +652,7 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
         }
         solver.pop();
         // The condition has been proven. Add it as an assumption for the rest of the block.
-        solver.add(cond);
+        solver.add(z3::implies(path_guard, cond));
     } else if (auto freeNode = dynamic_cast<FreeNode*>(stmt)) {
         z3::expr ptr_id = evalExpression(freeNode->expr.get());
         verifyPointerValid(ptr_id, "Double Free Check (free)", true); // Requires Owned (1)
@@ -612,6 +668,7 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
         verifyPointerValid(ptr_id, "Dereference Assignment (Write)");
         evalExpression(derefAssign->val_expr.get());
     }
+    current_node = old_node;
 }
 
 // --- Routine Checking ---
@@ -619,10 +676,11 @@ void Z3Verifier::checkStatement(ASTNode* stmt) {
 void Z3Verifier::checkRoutine(RoutineNode* node) {
     pushScope();
     current_routine = node;
+    current_node = node;
 
     // Declare formal parameters as symbolic Z3 variables
     for (const auto& p : node->params) {
-        z3::expr var = ctx.int_const(p.name.c_str());
+        z3::expr var = freshInt(p.name);
         declareVar(p.name, var);
     }
 

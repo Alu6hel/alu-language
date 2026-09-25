@@ -1,0 +1,13 @@
+@requires(count >= 0)
+@requires(count <= 5)
+routine example(int count) -> int {
+    int values[5];
+    int i = 0;
+    while (i < count) {
+        values[i] = i;
+        i = i + 1;
+    }
+    assert(i == count);
+    return i;
+}
+routine main() -> int { return example(3); }
